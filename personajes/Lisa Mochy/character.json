@@ -1,0 +1,117 @@
+{
+  "name": "Lisa Mochy",
+  "image_mode": "4_states",
+  "flip_x": false,
+  "mic_threshold": 32,
+  "discord_threshold": 48,
+  "scream_threshold": 86,
+  "props": [
+    {
+      "id": "prop_1794720181118",
+      "name": "Birthday",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\props\\birthday.png",
+      "layer": "front",
+      "follows_bounce": false,
+      "offset_x": -61,
+      "offset_y": -145,
+      "scale": 36,
+      "rotation": -34,
+      "enabled": false,
+      "visible_frames": "all",
+      "file_rel": "props/birthday.png"
+    }
+  ],
+  "extra_expressions": [
+    {
+      "role": "ext_trans_mouth_inbetween_7062",
+      "trigger": "trans_mouth_inbetween",
+      "title": "👄 Boca Semi-Abierta (Entre Abierto y Cerrado)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_mouth_inbetween_7062.png",
+      "motion": "Respiración",
+      "param": "130ms",
+      "speed": 1.0,
+      "file_rel": "ext_trans_mouth_inbetween_7062.png"
+    },
+    {
+      "role": "ext_state_scream_30280",
+      "trigger": "state_scream",
+      "title": "💥 Grito / Susto (Volumen Alto)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_state_scream_30280.png",
+      "motion": "Sacudida",
+      "param": "Barra de Grito",
+      "speed": 1.0,
+      "file_rel": "ext_state_scream_30280.png"
+    },
+    {
+      "role": "ext_trans_pre_scream_81532",
+      "trigger": "trans_pre_scream",
+      "title": "⚡ Sobresalto (Antes de gritar)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_pre_scream_81532.png",
+      "motion": "Sacudida",
+      "param": "100ms",
+      "speed": 1.0,
+      "file_rel": "ext_trans_pre_scream_81532.png"
+    },
+    {
+      "role": "ext_trans_blink_inbetween_38090",
+      "trigger": "trans_blink_inbetween",
+      "title": "👁️ Ojos Semi-Cerrados (Boca cerrada / General)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_inbetween_38090.png",
+      "motion": "Elástico",
+      "param": "Normal (65ms)",
+      "speed": 1.0,
+      "file_rel": "ext_trans_blink_inbetween_38090.png"
+    },
+    {
+      "role": "ext_trans_blink_talk_inbetween_96899",
+      "trigger": "trans_blink_talk_inbetween",
+      "title": "👁️🗨️ Variante: Ojos Semi-Cerrados (Boca abierta)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_talk_inbetween_96899.png",
+      "motion": "Ninguna",
+      "param": "Normal (65ms)",
+      "file_rel": "ext_trans_blink_talk_inbetween_96899.png"
+    },
+    {
+      "role": "ext_idle_fidget_22978",
+      "trigger": "idle_fidget",
+      "title": "✨ Tic / Gesto espontáneo",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_idle_fidget_22978.png",
+      "motion": "Saltitos",
+      "param": "Cada 15s",
+      "speed": 1.0,
+      "file_rel": "ext_idle_fidget_22978.png"
+    }
+  ],
+  "motions": {
+    "idle": "Respiración",
+    "idle_blink": "Saltitos",
+    "talk": "Elástico",
+    "talk_blink": "Ninguna",
+    "scream": "Sacudida",
+    "ext_trans_mouth_inbetween_7062": "Respiración",
+    "ext_state_scream_30280": "Sacudida",
+    "ext_trans_pre_scream_81532": "Sacudida",
+    "ext_trans_blink_inbetween_38090": "Elástico",
+    "ext_trans_blink_talk_inbetween_96899": "Ninguna",
+    "ext_idle_fidget_22978": "Saltitos"
+  },
+  "motion_speeds": {
+    "idle": 1.04,
+    "idle_blink": 1.0,
+    "talk": 0.71,
+    "talk_blink": 1.0,
+    "ext_trans_mouth_inbetween_7062": 1.0,
+    "ext_state_scream_30280": 1.0,
+    "ext_trans_pre_scream_81532": 1.0,
+    "ext_trans_blink_inbetween_38090": 1.0,
+    "ext_trans_blink_talk_inbetween_96899": 1.0,
+    "ext_idle_fidget_22978": 1.0
+  },
+  "expressions": {
+    "idle": "idle.png",
+    "idle_blink": "idle_blink.png",
+    "talk": "talk.png",
+    "talk_blink": "talk_blink.png",
+    "scream": "scream.png"
+  }
+}

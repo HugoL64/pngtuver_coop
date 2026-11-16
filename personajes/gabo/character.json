@@ -1,0 +1,53 @@
+{
+  "name": "gabo",
+  "image_mode": "2_states",
+  "flip_x": false,
+  "mic_threshold": 20,
+  "discord_threshold": 25,
+  "scream_threshold": 72,
+  "props": [],
+  "extra_expressions": [
+    {
+      "role": "ext_state_scream_alt_9000",
+      "trigger": "state_scream_alt",
+      "title": "🔥 Variante de Grito (Alternar al gritar)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\gabo\\ext_state_scream_alt_9000.png",
+      "motion": "Sacudida",
+      "param": "120ms",
+      "file_rel": "ext_state_scream_alt_9000.png"
+    },
+    {
+      "role": "ext_state_scream_82441",
+      "trigger": "state_scream",
+      "title": "💥 Grito / Susto (Volumen Alto)",
+      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\gabo\\ext_state_scream_82441.png",
+      "motion": "Sacudida",
+      "param": "Barra de Grito",
+      "file_rel": "ext_state_scream_82441.png"
+    }
+  ],
+  "motions": {
+    "idle": "Ninguna",
+    "idle_blink": "Ninguna",
+    "talk": "Ninguna",
+    "talk_blink": "Respiración",
+    "scream": "Sacudida",
+    "ext_state_scream_alt_9000": "Sacudida",
+    "ext_state_scream_82441": "Sacudida"
+  },
+  "motion_speeds": {
+    "idle": 0.63,
+    "idle_blink": 2.0,
+    "talk": 0.71,
+    "talk_blink": 1.0,
+    "ext_state_scream_alt_9000": 1.0,
+    "ext_state_scream_82441": 1.0
+  },
+  "expressions": {
+    "idle": "idle.png",
+    "idle_blink": "idle_blink.png",
+    "talk": "talk.png",
+    "talk_blink": "talk_blink.png",
+    "scream": "scream.png"
+  }
+}

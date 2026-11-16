@@ -1,0 +1,25 @@
+{
+  "name": "Osito Discord",
+  "image_mode": "4_states",
+  "flip_x": false,
+  "mic_threshold": 20,
+  "discord_threshold": 8,
+  "scream_threshold": 95,
+  "props": [],
+  "extra_expressions": [],
+  "motions": {
+    "idle": "Respiración",
+    "idle_blink": "Respiración",
+    "talk": "Ninguna",
+    "talk_blink": "Respiración",
+    "scream": "Sacudida"
+  },
+  "motion_speeds": {},
+  "expressions": {
+    "idle": "idle.png",
+    "idle_blink": "idle_blink.png",
+    "talk": "talk.png",
+    "talk_blink": "talk_blink.png",
+    "scream": "scream.png"
+  }
+}

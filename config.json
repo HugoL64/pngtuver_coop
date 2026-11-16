@@ -1,0 +1,80 @@
+{
+  "game_mode": "single",
+  "current_p1_profile": "Lisa Mochy",
+  "current_p2_profile": "Lisa Mochy",
+  "bg_color": "#0000FF",
+  "bounce_enabled": true,
+  "squash_enabled": true,
+  "hysteresis_enabled": true,
+  "congruence_enabled": true,
+  "mouth_flutter_enabled": true,
+  "experimental_enabled": true,
+  "twitch_alerts": {
+    "enabled": true,
+    "port": 8765,
+    "rules": [
+      {
+        "id": "rule_1794616369162",
+        "enabled": true,
+        "event": "",
+        "player": 1,
+        "action": "character",
+        "character": "Gatito Azul",
+        "duration": 8.0
+      },
+      {
+        "id": "rule_1794616370302",
+        "enabled": true,
+        "event": "",
+        "player": 1,
+        "action": "character",
+        "character": "Gatito Azul",
+        "duration": 8.0
+      },
+      {
+        "id": "rule_1794616370929",
+        "enabled": true,
+        "event": "",
+        "player": 1,
+        "action": "character",
+        "character": "Gatito Azul",
+        "duration": 8.0
+      }
+    ]
+  },
+  "hotkeys": {
+    "1": [],
+    "2": []
+  },
+  "character_layout": [
+    {
+      "type": "char",
+      "name": "Gatito Azul"
+    },
+    {
+      "type": "char",
+      "name": "Osito Discord"
+    },
+    {
+      "type": "char",
+      "name": "Lisa Mochi"
+    },
+    {
+      "type": "char",
+      "name": "Lisa Mochy"
+    },
+    {
+      "type": "char",
+      "name": "gabo"
+    }
+  ],
+  "mic_device_name": "Micrófono (3- fifine Microphone",
+  "discord_source_id": "app:discord",
+  "mic_threshold": 15,
+  "discord_threshold": 80,
+  "a1_idle": "D:\\Progra\\hobie\\vtuber coop\\assets\\avatar1_idle.png",
+  "a1_talk": "D:\\Progra\\hobie\\vtuber coop\\assets\\avatar1_talk.png",
+  "a2_idle": "D:\\Progra\\hobie\\vtuber coop\\assets\\avatar2_idle.png",
+  "a2_talk": "D:\\Progra\\hobie\\vtuber coop\\assets\\avatar2_talk.png",
+  "discord_device_name": "Altavoces (Realtek(R) Audio) [Loopback]"
+}

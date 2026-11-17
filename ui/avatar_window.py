@@ -1,12 +1,20 @@
-import tkinter as tk
+﻿import tkinter as tk
 from PIL import Image, ImageTk
 import os
 import random
 import time
 import math
+import gc
+from core.async_loader import get_performance_preset, load_pil_frames_from_path, resize_avatar_frames, submit_bg_task
+from core.lipsync import (
+    MouthLipsyncEngine,
+    MouthRenderCache,
+    is_independent_mouth_active,
+    resolve_mouth_frame_config,
+)
 
 class AvatarWindow(tk.Toplevel):
-    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False):
+    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False, independent_mouth=None, perf_mode="performance"):
         super().__init__(master)
 
         self.title(title)
@@ -61,6 +69,14 @@ class AvatarWindow(tk.Toplevel):
         self.cached_props = []
         self.photo_props = []
         self.prop_canvas_items = {}
+        self.independent_mouth = independent_mouth or {}
+        self.mouth_engine = MouthLipsyncEngine()
+        self.mouth_cache = MouthRenderCache()
+        self.mouth_item = None
+        self._mouth_slot = "closed"
+        self._mouth_squash = 0
+        self._load_gen = 0
+        self.perf_mode = perf_mode or "performance"
 
         # Raw PIL frames y cache de PhotoImage pre-escaladas por estado (soporta PNG estático, APNG, GIF y WEBP animado)
         # Formato: { key: [(pil_rgba_image, duration_sec), ...] }
@@ -111,64 +127,126 @@ class AvatarWindow(tk.Toplevel):
         self._animate_loop()
 
     def load_images(self):
-        self.cached_images.clear()
-        for key, path in self.images_paths.items():
-            if path and os.path.exists(path):
-                try:
-                    img = Image.open(path)
-                    n_frames = min(getattr(img, "n_frames", 1), 60)
-                    frames = []
-                    if n_frames > 1 and getattr(img, "is_animated", False):
-                        for f_idx in range(n_frames):
-                            img.seek(f_idx)
-                            dur_ms = img.info.get("duration", 80) or 80
-                            dur_sec = max(0.02, min(2.0, dur_ms / 1000.0))
-                            frames.append((img.convert("RGBA").copy(), dur_sec))
-                    else:
-                        frames.append((img.convert("RGBA"), 1.0))
-                    self.cached_images[key] = frames
-                except Exception as e:
-                    print(f"[AvatarWindow] Error cargando {key} ({path}): {e}")
+        self._load_gen += 1
+        gen_id = self._load_gen
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w <= 20 or h <= 20:
+            w, h = 450, 550
+        padding = 20
+        avail_w = max(10, w - padding * 2)
+        avail_h = max(10, h - padding * 2)
+        paths_snapshot = dict(self.images_paths)
+        props_snapshot = [dict(p) for p in (self.props or [])]
+        flip_x = self.flip_x
+        mouth_cfg = dict(self.independent_mouth) if isinstance(self.independent_mouth, dict) else {}
+        preset = get_performance_preset(getattr(self, "perf_mode", "performance"))
+        av_max_dim = preset["obs_max_dim"]
+        av_max_frames = preset["obs_max_frames"]
+        pr_max_dim = preset["obs_prop_dim"]
+        m_max_dim = preset["obs_mouth_dim"]
 
-        # Cargar imágenes de accesorios / props
-        self.cached_props.clear()
-        for p in self.props:
-            f_path = p.get("file", "")
-            if f_path and os.path.exists(f_path):
-                try:
-                    with Image.open(f_path) as p_img:
-                        n_f = min(getattr(p_img, "n_frames", 1), 60)
-                        p_frames = []
-                        if n_f > 1 and getattr(p_img, "is_animated", False):
-                            for f_idx in range(n_f):
-                                p_img.seek(f_idx)
-                                dur_ms = p_img.info.get("duration", 80) or 80
-                                dur_sec = max(0.02, min(2.0, dur_ms / 1000.0))
-                                frame_rgba = p_img.convert("RGBA").copy()
-                                if max(frame_rgba.size) > 1024:
-                                    frame_rgba.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-                                p_frames.append((frame_rgba, dur_sec))
-                        else:
-                            frame_rgba = p_img.convert("RGBA")
-                            if max(frame_rgba.size) > 1024:
-                                frame_rgba.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-                            p_frames.append((frame_rgba, 1.0))
-                    self.cached_props.append({
-                        "id": p.get("id", str(id(p))),
+        def _bg_load():
+            raw_imgs = {}
+            for key, path in paths_snapshot.items():
+                if self._load_gen != gen_id:
+                    return
+                frames = load_pil_frames_from_path(path, max_dim=av_max_dim, max_frames=av_max_frames)
+                if frames:
+                    raw_imgs[key] = frames
+
+            raw_props = []
+            for pr in props_snapshot:
+                if self._load_gen != gen_id:
+                    return
+                f_path = pr.get("file", "")
+                p_frames = load_pil_frames_from_path(f_path, max_dim=pr_max_dim, max_frames=av_max_frames)
+                if p_frames:
+                    raw_props.append({
+                        "id": pr.get("id", str(id(pr))),
                         "raw_frames": p_frames,
-                        "layer": p.get("layer", "front"),
-                        "follows_bounce": bool(p.get("follows_bounce", False)),
-                        "offset_x": int(p.get("offset_x", 0)),
-                        "offset_y": int(p.get("offset_y", 0)),
-                        "scale": float(p.get("scale", 100)) / 100.0,
-                        "rotation": float(p.get("rotation", 0)),
-                        "enabled": bool(p.get("enabled", True)),
-                        "visible_frames": p.get("visible_frames", "all"),
+                        "layer": pr.get("layer", "front"),
+                        "follows_bounce": bool(pr.get("follows_bounce", False)),
+                        "offset_x": int(pr.get("offset_x", 0)),
+                        "offset_y": int(pr.get("offset_y", 0)),
+                        "scale": float(pr.get("scale", 100)) / 100.0,
+                        "rotation": float(pr.get("rotation", 0)),
+                        "enabled": bool(pr.get("enabled", True)),
+                        "visible_frames": pr.get("visible_frames", "all"),
                     })
-                except Exception as e:
-                    print(f"[AvatarWindow] Error cargando prop {p.get('name')}: {e}")
 
-        self._rebuild_photo_cache()
+            resized_imgs = resize_avatar_frames(raw_imgs, avail_w, avail_h, flip_x=flip_x)
+            resized_props = []
+            for cp in raw_props:
+                sc_f = cp.get("scale", 1.0)
+                rot_d = float(cp.get("rotation", 0))
+                s_frames = []
+                for raw_img, dur_sec in cp["raw_frames"]:
+                    iw, ih = raw_img.size
+                    if iw <= 0 or ih <= 0:
+                        continue
+                    ratio = min(avail_w / iw, avail_h / ih) * sc_f
+                    nw = max(1, int(iw * ratio))
+                    nh = max(1, int(ih * ratio))
+                    res_p = raw_img.resize((nw, nh), Image.Resampling.LANCZOS)
+                    if rot_d != 0:
+                        res_p = res_p.rotate(-rot_d, resample=Image.Resampling.BICUBIC, expand=True)
+                    s_frames.append((res_p, dur_sec))
+                resized_props.append((cp, s_frames))
+
+            mouth_cache_bg = MouthRenderCache()
+            mouth_cache_bg.load_pil_frames(mouth_cfg, flip_x=flip_x, max_dim=m_max_dim)
+
+            if self._load_gen == gen_id:
+                try:
+                    self.after(0, lambda: self._apply_async_loaded_images(
+                        gen_id, w, h, raw_imgs, raw_props, resized_imgs, resized_props, mouth_cache_bg
+                    ))
+                except Exception:
+                    pass
+
+        submit_bg_task(_bg_load)
+
+    def _apply_async_loaded_images(self, gen_id, w, h, raw_imgs, raw_props, resized_imgs, resized_props, mouth_cache_bg):
+        if gen_id != self._load_gen or not self.winfo_exists():
+            return
+        self.cached_images = raw_imgs
+        self.cached_props = raw_props
+        self.mouth_cache = mouth_cache_bg
+        self._last_window_size = (w, h)
+        self.photo_cache.clear()
+        self.base_resized_images.clear()
+        self.squash_photo_cache.clear()
+        gc.collect()
+
+        for key, flist in resized_imgs.items():
+            pil_frames = [fr for fr, _ in flist]
+            scaled_frames = [(ImageTk.PhotoImage(fr), dur) for fr, dur in flist]
+            if scaled_frames:
+                self.photo_cache[key] = scaled_frames
+                self.base_resized_images[key] = pil_frames
+
+        for old_id in list(self.prop_canvas_items.values()):
+            try:
+                self.canvas.delete(old_id)
+            except Exception:
+                pass
+        self.prop_canvas_items.clear()
+        self.photo_props.clear()
+        for cp, s_frames in resized_props:
+            self.photo_props.append({
+                "id": cp["id"],
+                "_file": cp.get("_file", ""),
+                "_scale": cp.get("scale", 1.0),
+                "_rotation": float(cp.get("rotation", 0)),
+                "frames": [(ImageTk.PhotoImage(fr), dur) for fr, dur in s_frames],
+                "layer": cp.get("layer", "front"),
+                "follows_bounce": cp.get("follows_bounce", False),
+                "offset_x": cp.get("offset_x", 0),
+                "offset_y": cp.get("offset_y", 0),
+                "enabled": cp.get("enabled", True),
+                "visible_frames": cp.get("visible_frames", "all"),
+            })
         self._update_display()
 
     def _rebuild_photo_cache(self):
@@ -179,12 +257,15 @@ class AvatarWindow(tk.Toplevel):
             h = 550
 
         padding = 20
+        if not self.cached_images:
+            return
         available_w = max(10, w - padding * 2)
         available_h = max(10, h - padding * 2)
 
         self.photo_cache.clear()
         self.base_resized_images.clear()
         self.squash_photo_cache.clear()
+        gc.collect()
         for key, frame_list in self.cached_images.items():
             if not frame_list:
                 continue
@@ -352,7 +433,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_props = new_photos
         self._update_display()
 
-    def update_images(self, image_dict, mode_4_states, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=None):
+    def update_images(self, image_dict, mode_4_states, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=None, independent_mouth=None):
         self.images_paths = image_dict or {}
         self.mode_4_states = mode_4_states
         if props_list is not None:
@@ -365,6 +446,8 @@ class AvatarWindow(tk.Toplevel):
             self.extra_expressions = extra_expressions
         if flip_x is not None:
             self.flip_x = bool(flip_x)
+        if independent_mouth is not None:
+            self.independent_mouth = independent_mouth
         self.talk_start_time = 0.0
         self.talk_end_time = 0.0
         self.scream_start_time = 0.0
@@ -747,6 +830,21 @@ class AvatarWindow(tk.Toplevel):
         elif pos_changed:
             self._update_position_only()
 
+        if is_independent_mouth_active(self.independent_mouth):
+            new_slot, new_msquash = self.mouth_engine.update(
+                self.audio_level,
+                self.talk_threshold,
+                self.is_talking,
+                self.is_screaming,
+                self.is_muted,
+                self.mouth_cache.pil_frames.keys(),
+                squash_strength=self.independent_mouth.get("squash_strength", 100),
+            )
+            if new_slot != self._mouth_slot or new_msquash != self._mouth_squash:
+                self._mouth_slot = new_slot
+                self._mouth_squash = new_msquash
+                self._update_display()
+
         self.after(16, self._animate_loop)
 
     def _get_squash_photo(self, active_key, frame_idx):
@@ -779,6 +877,8 @@ class AvatarWindow(tk.Toplevel):
         nh = max(1, int(round(bh * sy)))
         deformed = base_img.resize((nw, nh), Image.Resampling.BILINEAR)
         res = ImageTk.PhotoImage(deformed)
+        if len(self.squash_photo_cache) >= get_performance_preset(getattr(self, "perf_mode", "performance"))["squash_cache_max"]:
+            self.squash_photo_cache.clear()
         self.squash_photo_cache[cache_key] = res
         return res
 
@@ -873,7 +973,7 @@ class AvatarWindow(tk.Toplevel):
                 return ex_both["role"]
 
         # 6. Hablando y Transición de Boca / Pre-Habla (trans_mouth_inbetween / trans_pre_talk)
-        if talking:
+        if talking and not is_independent_mouth_active(self.independent_mouth):
             ex_mouth_mid = find_extra("trans_mouth_inbetween")
             if ex_mouth_mid and self.talk_start_time > 0:
                 dur_ms = self._parse_ms_param(ex_mouth_mid.get("param", "90ms"), 90)
@@ -1019,6 +1119,7 @@ class AvatarWindow(tk.Toplevel):
         av_cx, av_cy, pos_scale = self._get_avatar_center_and_scale(w, h, padding)
 
         # 2. Mover cada accesorio según si sigue o no el rebote
+        self._update_mouth_position_only(av_cx, av_cy, pos_scale, active_key)
         for p in self.photo_props:
             item_id = self.prop_canvas_items.get(p["id"])
             if item_id:
@@ -1106,6 +1207,7 @@ class AvatarWindow(tk.Toplevel):
                 self.canvas.coords(self.placeholder_item, w // 2, h // 2)
 
         # 3. DIBUJAR ACCESORIOS DE FRENTE (FRONT PROPS)
+        mouth_canvas_item = self._render_mouth_item(av_cx, av_cy, pos_scale, active_key)
         front_items = []
         for p in self.photo_props:
             if p["layer"] == "back":
@@ -1119,6 +1221,9 @@ class AvatarWindow(tk.Toplevel):
             for b_it in back_items:
                 self.canvas.tag_lower(b_it, self.image_item)
             prev_it = self.image_item
+            if mouth_canvas_item is not None:
+                self.canvas.tag_raise(mouth_canvas_item, prev_it)
+                prev_it = mouth_canvas_item
             for f_it in front_items:
                 self.canvas.tag_raise(f_it, prev_it)
                 prev_it = f_it
@@ -1168,9 +1273,81 @@ class AvatarWindow(tk.Toplevel):
 
         return item_id
 
+    def update_independent_mouth_fast(self, mouth_cfg):
+        self.independent_mouth = mouth_cfg or {}
+        self.mouth_cache.load_pil_frames(self.independent_mouth, flip_x=self.flip_x)
+        self._update_display()
+
+    def _get_mouth_coords(self, av_cx, av_cy, pos_scale, ox, oy):
+        eff_ox = -ox if self.flip_x else ox
+        dx = int(eff_ox * pos_scale)
+        dy = int(oy * pos_scale)
+        if self.independent_mouth.get("follows_bounce", True):
+            return av_cx + dx + self.jitter_x, av_cy + dy + int(self.current_offset_y) + self.jitter_y
+        return av_cx + dx, av_cy + dy
+
+    def _update_mouth_position_only(self, av_cx, av_cy, pos_scale, active_key):
+        if self.mouth_item is None:
+            return
+        if not is_independent_mouth_active(self.independent_mouth):
+            self.canvas.itemconfig(self.mouth_item, state="hidden")
+            return
+        hidden, ox, oy, _, _, _ = resolve_mouth_frame_config(self.independent_mouth, active_key)
+        if hidden:
+            self.canvas.itemconfig(self.mouth_item, state="hidden")
+            return
+        mx, my = self._get_mouth_coords(av_cx, av_cy, pos_scale, ox, oy)
+        self.canvas.coords(self.mouth_item, mx, my)
+        self.canvas.itemconfig(self.mouth_item, state="normal")
+
+    def _render_mouth_item(self, av_cx, av_cy, pos_scale, active_key):
+        if not is_independent_mouth_active(self.independent_mouth):
+            if self.mouth_item is not None:
+                self.canvas.itemconfig(self.mouth_item, state="hidden")
+            return None
+
+        hidden, ox, oy, sc_pct, rot_deg, ov_key = resolve_mouth_frame_config(self.independent_mouth, active_key)
+        if hidden:
+            if self.mouth_item is not None:
+                self.canvas.itemconfig(self.mouth_item, state="hidden")
+            return None
+
+        eff_rot = -rot_deg if self.flip_x else rot_deg
+        m_photo = self.mouth_cache.get_photo(
+            self._mouth_slot,
+            ov_key,
+            self.anim_frame_idx,
+            self._mouth_squash,
+            pos_scale,
+            sc_pct,
+            eff_rot,
+            max_cache=get_performance_preset(getattr(self, "perf_mode", "performance"))["mouth_cache_max"],
+        )
+        if m_photo is None:
+            if self.mouth_item is not None:
+                self.canvas.itemconfig(self.mouth_item, state="hidden")
+            return None
+
+        mx, my = self._get_mouth_coords(av_cx, av_cy, pos_scale, ox, oy)
+        if self.mouth_item is None:
+            self.mouth_item = self.canvas.create_image(mx, my, anchor=tk.CENTER, image=m_photo)
+        else:
+            self.canvas.itemconfig(self.mouth_item, image=m_photo, state="normal")
+            self.canvas.coords(self.mouth_item, mx, my)
+        self.canvas.current_mouth_photo = m_photo
+        return self.mouth_item
+
     def _render_current_frame(self):
         """Compatibilidad con llamadas externas existentes."""
         self._update_display()
 
     def on_close(self):
+        self.cached_images.clear()
+        self.base_resized_images.clear()
+        self.photo_cache.clear()
+        self.squash_photo_cache.clear()
+        self.cached_props.clear()
+        self.photo_props.clear()
+        self.mouth_cache.clear()
         self.destroy()
+        gc.collect()

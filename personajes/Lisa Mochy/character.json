@@ -37,7 +37,7 @@
       "trigger": "state_scream",
       "title": "💥 Grito / Susto (Volumen Alto)",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_state_scream_30280.png",
-      "motion": "Sacudida",
+      "motion": "Flotar",
       "param": "Barra de Grito",
       "speed": 1.0,
       "file_rel": "ext_state_scream_30280.png"
@@ -47,7 +47,7 @@
       "trigger": "trans_pre_scream",
       "title": "⚡ Sobresalto (Antes de gritar)",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_pre_scream_81532.png",
-      "motion": "Sacudida",
+      "motion": "Balanceo",
       "param": "100ms",
       "speed": 1.0,
       "file_rel": "ext_trans_pre_scream_81532.png"
@@ -58,7 +58,7 @@
       "title": "👁️ Ojos Semi-Cerrados (Boca cerrada / General)",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_inbetween_38090.png",
       "motion": "Elástico",
-      "param": "Normal (65ms)",
+      "param": "Rápido (45ms)",
       "speed": 1.0,
       "file_rel": "ext_trans_blink_inbetween_38090.png"
     },
@@ -67,8 +67,9 @@
       "trigger": "trans_blink_talk_inbetween",
       "title": "👁️🗨️ Variante: Ojos Semi-Cerrados (Boca abierta)",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_talk_inbetween_96899.png",
-      "motion": "Ninguna",
-      "param": "Normal (65ms)",
+      "motion": "Respiración",
+      "param": "Suave (90ms)",
+      "speed": 1.0,
       "file_rel": "ext_trans_blink_talk_inbetween_96899.png"
     },
     {
@@ -82,6 +83,28 @@
       "file_rel": "ext_idle_fidget_22978.png"
     }
   ],
+  "independent_mouth": {
+    "enabled": true,
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "sprites_rel": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "frame_overrides": {}
+  },
   "motions": {
     "idle": "Respiración",
     "idle_blink": "Saltitos",
@@ -89,10 +112,10 @@
     "talk_blink": "Ninguna",
     "scream": "Sacudida",
     "ext_trans_mouth_inbetween_7062": "Respiración",
-    "ext_state_scream_30280": "Sacudida",
-    "ext_trans_pre_scream_81532": "Sacudida",
+    "ext_state_scream_30280": "Flotar",
+    "ext_trans_pre_scream_81532": "Balanceo",
     "ext_trans_blink_inbetween_38090": "Elástico",
-    "ext_trans_blink_talk_inbetween_96899": "Ninguna",
+    "ext_trans_blink_talk_inbetween_96899": "Respiración",
     "ext_idle_fidget_22978": "Saltitos"
   },
   "motion_speeds": {

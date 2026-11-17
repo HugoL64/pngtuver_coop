@@ -1,0 +1,52 @@
+{
+  "name": "defy 2",
+  "image_mode": "2_states",
+  "flip_x": false,
+  "mic_threshold": 20,
+  "discord_threshold": 25,
+  "scream_threshold": 55,
+  "props": [],
+  "extra_expressions": [],
+  "independent_mouth": {
+    "enabled": false,
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "sprites_rel": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "frame_overrides": {}
+  },
+  "motions": {
+    "idle": "Ninguna",
+    "idle_blink": "Ninguna",
+    "talk": "Ninguna",
+    "talk_blink": "Ninguna",
+    "scream": "Ninguna"
+  },
+  "motion_speeds": {
+    "idle": 0.63,
+    "idle_blink": 2.0,
+    "talk": 0.71,
+    "talk_blink": 1.0
+  },
+  "expressions": {
+    "idle": "idle.png",
+    "idle_blink": "idle_blink.png",
+    "talk": "talk.png",
+    "talk_blink": "talk_blink.png",
+    "scream": "scream.png"
+  }
+}

@@ -7,6 +7,28 @@
   "scream_threshold": 95,
   "props": [],
   "extra_expressions": [],
+  "independent_mouth": {
+    "enabled": false,
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "sprites_rel": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "frame_overrides": {}
+  },
   "motions": {
     "idle": "Respiración",
     "idle_blink": "Respiración",

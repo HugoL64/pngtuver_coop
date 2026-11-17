@@ -5,22 +5,30 @@
   "mic_threshold": 11,
   "discord_threshold": 25,
   "scream_threshold": 63,
-  "props": [
-    {
-      "id": "prop_Hit-Yellow.png_1",
-      "name": "Hit Yellow",
-      "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Gatito Azul\\props\\Hit-Yellow.png",
-      "file_rel": "props/Hit-Yellow.png",
-      "layer": "front",
-      "follows_bounce": false,
-      "offset_x": 0,
-      "offset_y": 0,
-      "scale": 100,
-      "enabled": true,
-      "visible_frames": "all"
-    }
-  ],
+  "props": [],
   "extra_expressions": [],
+  "independent_mouth": {
+    "enabled": false,
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "sprites_rel": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "frame_overrides": {}
+  },
   "motions": {
     "idle": "Ninguna",
     "idle_blink": "Ninguna",

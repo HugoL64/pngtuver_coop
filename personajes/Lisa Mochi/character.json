@@ -34,11 +34,33 @@
       "file_rel": "ext_trans_mouth_inbetween_33732.png"
     }
   ],
+  "independent_mouth": {
+    "enabled": true,
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "sprites_rel": {
+      "closed": "",
+      "half": "",
+      "open": "",
+      "wide": ""
+    },
+    "frame_overrides": {}
+  },
   "motions": {
     "idle": "Ninguna",
     "idle_blink": "Respiración",
     "talk": "Ninguna",
-    "talk_blink": "Sacudida",
+    "talk_blink": "Flotar",
     "scream": "Sacudida",
     "ext_trans_mouth_inbetween_33732": "Ninguna"
   },

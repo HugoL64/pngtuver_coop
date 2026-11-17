@@ -5,10 +5,11 @@
   "bg_color": "#0000FF",
   "bounce_enabled": true,
   "squash_enabled": true,
-  "hysteresis_enabled": true,
+  "hysteresis_enabled": false,
   "congruence_enabled": true,
   "mouth_flutter_enabled": true,
   "experimental_enabled": true,
+  "performance_mode": "performance",
   "twitch_alerts": {
     "enabled": true,
     "port": 8765,
@@ -52,12 +53,14 @@
       "name": "Gatito Azul"
     },
     {
-      "type": "char",
-      "name": "Osito Discord"
-    },
-    {
-      "type": "char",
-      "name": "Lisa Mochi"
+      "type": "folder",
+      "id": "fld_1794882207089_1",
+      "name": "Carpeta 1",
+      "expanded": true,
+      "items": [
+        "Osito Discord",
+        "defy"
+      ]
     },
     {
       "type": "char",
@@ -65,7 +68,11 @@
     },
     {
       "type": "char",
-      "name": "gabo"
+      "name": "Lisa Mochi"
+    },
+    {
+      "type": "char",
+      "name": "defy 2"
     }
   ],
   "mic_device_name": "Micrófono (3- fifine Microphone",

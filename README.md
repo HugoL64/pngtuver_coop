@@ -39,3 +39,23 @@ Proyecto listo para usar con **2 avatares PNGtuber en dos ventanas independiente
 3. Haz clic en **"🚀 ENVIAR A OBS (Abrir Avatares)"**.
 4. En OBS, añade dos fuentes de **Captura de ventana** y aplica el filtro **Fondo croma (Verde)**.
 
+---
+
+## A Gift for the Community
+
+This project is a gift from **HugoL64** to the creator and streamer community. Feel free to use it, enjoy it on your streams, and share it with your friends for free.
+
+## Project License
+
+This project uses a **dual license** to protect both the code and the artwork while keeping its free, community-driven spirit:
+
+### Source Code — GNU GPLv3
+* All source code in this program (`.py`, `.bat`, `.spec`, and scripts) is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+* **Cannot be privatized:** You are free to use, modify, and improve the code, but **any modified or derivative version you distribute must remain open-source and free under the same GPLv3 license**. It cannot be closed-source or turned into proprietary software.
+
+### Visual Assets and Artwork (`/assets` and `/personajes`) — CC BY-NC-SA 4.0
+* All sprites, illustrations, poses, props, and visual elements located in the `/assets` and `/personajes` folders are licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**, with the following clarifications:
+  * **Permitted use:** You may freely use them in your livestreams (Twitch, YouTube, Kick, etc.) and videos, modify them for personal use, and **share or gift them for free** within the community with proper attribution.
+  * **No selling (Non-Commercial):** Selling, reselling, charging for these files, or including them in paid products or physical/digital merchandise is prohibited.
+  * **AI restriction (applies to artwork only):** This restriction applies exclusively to the visual assets and not to the source code. Using this artwork to train Artificial Intelligence models, or using generative AI on it to alter it, create variations, or attempt to bypass this license for commercial purposes, is prohibited. Any derivative work based on this artwork automatically inherits the **Non-Commercial (NC)** and **ShareAlike (SA)** conditions.
+

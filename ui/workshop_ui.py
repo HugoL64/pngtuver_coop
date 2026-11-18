@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import json
@@ -19,6 +19,14 @@ from core.lipsync import (
     has_any_mouth_sprite,
     normalize_independent_mouth,
     resolve_mouth_frame_config,
+)
+from core.eyes import (
+    EyesRenderCache,
+    compute_mouse_eye_offset,
+    default_independent_eyes,
+    has_eyes_sprite,
+    normalize_independent_eyes,
+    resolve_eyes_frame_config,
 )
 
 
@@ -48,6 +56,24 @@ class WorkshopMixin:
 
         mouth_hdr_f = tk.Frame(top_w, bg="#FFFFFF")
         mouth_hdr_f.pack(side=tk.RIGHT)
+
+        self.w_eyes_cfg_btn = tk.Button(
+            mouth_hdr_f, text="👀 Configurar Ojos", font=("Segoe UI", 8, "bold"),
+            bg="#E0F2FE", fg="#0369A1", activebackground="#3671C6", activeforeground="#FFFFFF",
+            relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+            command=self._open_independent_eyes_dialog
+        )
+        self.w_eyes_cfg_btn.pack(side=tk.RIGHT, padx=(6, 0))
+
+        self.w_indep_eyes_var = tk.BooleanVar(value=False)
+        self.w_indep_eyes_check = tk.Checkbutton(
+            mouth_hdr_f, text="Ojos al mouse",
+            variable=self.w_indep_eyes_var, command=self._on_workshop_indep_eyes_toggle,
+            bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0", activeforeground="#0F172A",
+            selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2",
+            padx=6, pady=1, relief="solid", bd=1
+        )
+        self.w_indep_eyes_check.pack(side=tk.RIGHT, padx=(10, 0))
 
         self.w_mouth_cfg_btn = tk.Button(
             mouth_hdr_f, text="👄 Configurar Boca", font=("Segoe UI", 8, "bold"),
@@ -270,6 +296,11 @@ class WorkshopMixin:
             m_on = bool(m_cfg.get("enabled", False))
             self.w_indep_mouth_var.set(m_on)
             self._update_mouth_switch_style(m_on)
+        if hasattr(self, "w_indep_eyes_var"):
+            e_cfg = target_data.get("independent_eyes") or {}
+            e_on = bool(e_cfg.get("enabled", False))
+            self.w_indep_eyes_var.set(e_on)
+            self._update_eyes_switch_style(e_on)
         self.w_live_avatar.set_character(target_data, prefix=prefix)
 
         mode = target_data.get("image_mode", "4_states")
@@ -2222,7 +2253,13 @@ class WorkshopMixin:
             prop = get_selected_prop()
             if not prop:
                 return
-            step = 5 if event.delta > 0 else -5
+            num = getattr(event, "num", None)
+            if num == 4:
+                step = 5
+            elif num == 5:
+                step = -5
+            else:
+                step = 5 if getattr(event, "delta", 0) > 0 else -5
             new_sc = max(10, min(250, int(prop.get("scale", 100)) + step))
             if new_sc != prop.get("scale"):
                 prop["scale"] = new_sc
@@ -2240,6 +2277,8 @@ class WorkshopMixin:
         editor_canvas.bind("<B1-Motion>", on_canvas_ldrag)
         editor_canvas.bind("<ButtonRelease-1>", on_canvas_lrelease)
         editor_canvas.bind("<MouseWheel>", on_canvas_wheel)
+        editor_canvas.bind("<Button-4>", on_canvas_wheel)
+        editor_canvas.bind("<Button-5>", on_canvas_wheel)
         editor_canvas.bind("<Button-3>", on_canvas_rclick)
 
         def on_preview_frame_changed(_e=None):
@@ -2909,3 +2948,613 @@ class WorkshopMixin:
 
         refresh_slot_labels()
         load_controls_for_role("idle")
+
+    # =========================================================================
+    # --- CONFIGURACIÓN DE OJOS QUE SIGUEN AL MOUSE (ESTILO HONK) ---
+    # =========================================================================
+    def _update_eyes_switch_style(self, enabled):
+        if hasattr(self, "w_indep_eyes_check"):
+            if enabled:
+                self.w_indep_eyes_check.config(bg="#DCFCE7", fg="#166534", activebackground="#BBF7D0")
+            else:
+                self.w_indep_eyes_check.config(bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0")
+        if hasattr(self, "w_eyes_cfg_btn"):
+            self.w_eyes_cfg_btn.config(
+                bg="#E0F2FE" if enabled else "#F1F5F9",
+                fg="#0369A1" if enabled else "#64748B",
+            )
+
+    def _apply_independent_eyes_to_character(self, char_name, eyes_cfg):
+        folder_path = self._get_character_folder(char_name)
+        clean_cfg = normalize_independent_eyes(eyes_cfg, folder_path=folder_path)
+
+        for p_key, rt_dict in (
+            ("player1", self.p1_data if self.global_config.get("current_p1_profile") == char_name else None),
+            ("player2", self.p2_data if self.global_config.get("current_p2_profile") == char_name else None),
+        ):
+            prof = self.profiles.get(p_key, {}).get(char_name)
+            for d in (prof, rt_dict):
+                if isinstance(d, dict):
+                    d["independent_eyes"] = normalize_independent_eyes(clean_cfg, folder_path=folder_path)
+
+        self._save_character_folder_meta(char_name)
+        self.save_profiles_to_disk()
+
+        self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
+        self.p2_live_avatar.set_character(self.p2_data, prefix="a2")
+        is_p1 = (self.workshop_player == 1)
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        self.w_live_avatar.set_character(target_dict, prefix="a1" if is_p1 else "a2")
+        self._sync_windows_images()
+
+    def _on_workshop_indep_eyes_toggle(self):
+        val = bool(self.w_indep_eyes_var.get())
+        is_p1 = (self.workshop_player == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        folder_path = self._get_character_folder(curr_name)
+
+        eyes_cfg = normalize_independent_eyes(target_dict.get("independent_eyes"), folder_path=folder_path)
+        eyes_cfg["enabled"] = val
+        self._update_eyes_switch_style(val)
+        self._apply_independent_eyes_to_character(curr_name, eyes_cfg)
+        log_debug(f"[TALLER] 👀 Ojos al mouse para '{curr_name}' -> {val}")
+
+        if val and not has_eyes_sprite(eyes_cfg):
+            self._open_independent_eyes_dialog()
+
+    def _open_independent_eyes_dialog(self):
+        is_p1 = (self.workshop_player == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        prefix = "a1" if is_p1 else "a2"
+        folder_path = self._get_character_folder(curr_name)
+        flip_x = bool(target_dict.get("flip_x", False))
+
+        eyes_cfg = normalize_independent_eyes(target_dict.get("independent_eyes"), folder_path=folder_path)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title(f"👀 Ojos al Mouse (Estilo Honk) - {curr_name}")
+        dlg.geometry("900x670")
+        dlg.minsize(820, 620)
+        dlg.configure(bg="#DFE5EE")
+        dlg.transient(self.root)
+        dlg.grab_set()
+
+        main_f = tk.Frame(dlg, bg="#DFE5EE", padx=12, pady=10)
+        main_f.pack(fill=tk.BOTH, expand=True)
+
+        # Cabecera
+        hdr = tk.Frame(main_f, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=8)
+        hdr.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            hdr, text=f"👀 Ojos que Siguen al Mouse — {curr_name}",
+            font=("Segoe UI", 11, "bold"), bg="#FFFFFF", fg="#0F172A"
+        ).pack(side=tk.LEFT)
+
+        enabled_var = tk.BooleanVar(value=bool(eyes_cfg.get("enabled", False)))
+
+        def on_enable_toggle():
+            eyes_cfg["enabled"] = bool(enabled_var.get())
+            if hasattr(self, "w_indep_eyes_var"):
+                self.w_indep_eyes_var.set(eyes_cfg["enabled"])
+                self._update_eyes_switch_style(eyes_cfg["enabled"])
+            commit_and_sync()
+
+        tk.Checkbutton(
+            hdr, text="Activar seguimiento al mouse", variable=enabled_var, command=on_enable_toggle,
+            bg="#DCFCE7" if enabled_var.get() else "#F1F5F9", fg="#0F172A",
+            font=("Segoe UI", 9, "bold"), padx=8, pady=2, relief="solid", bd=1, cursor="hand2"
+        ).pack(side=tk.RIGHT)
+
+        # Cuerpo en 2 columnas
+        body = tk.Frame(main_f, bg="#DFE5EE")
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # Columna izquierda: Vista previa interactiva
+        left_col = tk.Frame(body, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=10)
+        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 8))
+
+        tk.Label(
+            left_col, text="VISTA PREVIA (Arrastra las pupilas, rueda = escala)",
+            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#3671C6"
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        prev_size = 330
+        preview_canvas = tk.Canvas(left_col, width=prev_size, height=prev_size, bg="#F8FBFF", highlightthickness=2, highlightbackground="#CBD5E1")
+        preview_canvas.pack(pady=(0, 8))
+
+        # Selector de pose a editar
+        pose_row = tk.Frame(left_col, bg="#FFFFFF")
+        pose_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(pose_row, text="Pose a editar:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+
+        pose_choices = [
+            ("idle", "Quieto (idle)"),
+            ("talk", "Hablando (talk)"),
+            ("idle_blink", "Pestañeo (idle_blink)"),
+            ("talk_blink", "Hablando + Pestañeo"),
+            ("scream", "Grito (scream)"),
+        ]
+        for ex in (target_dict.get("extra_expressions") or []):
+            r_id = ex.get("role")
+            if r_id:
+                pose_choices.append((r_id, ex.get("name", r_id)))
+
+        label_to_role = {lbl: r for r, lbl in pose_choices}
+        role_to_label = {r: lbl for r, lbl in pose_choices}
+        pose_var = tk.StringVar(value=role_to_label.get("idle", "Quieto (idle)"))
+        pose_combo = ttk.Combobox(pose_row, textvariable=pose_var, values=[lbl for _, lbl in pose_choices], state="readonly", width=24)
+        pose_combo.pack(side=tk.RIGHT)
+
+        live_test_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            left_col, text="🎯 Probar seguimiento en vivo con mi mouse",
+            variable=live_test_var, bg="#FFFFFF", fg="#0369A1",
+            font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(anchor=tk.W, pady=(2, 4))
+
+        tk.Label(
+            left_col,
+            text="💡 Consejo: Dibuja tu personaje con los ojos blancos\n(sin pupilas) y carga aquí solo las pupilas en PNG.",
+            font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", justify=tk.LEFT
+        ).pack(anchor=tk.W)
+
+        # Columna derecha: Imagen de pupilas + sliders
+        right_scroll = ScrollableFrame(body, bg="#FFFFFF")
+        right_scroll.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        rc = right_scroll.content
+
+        # Sección 1: Imagen PNG de las pupilas
+        sp_box = tk.LabelFrame(rc, text="1. Imagen de Pupilas / Ojos (PNG transparente)", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
+        sp_box.pack(fill=tk.X, padx=8, pady=(6, 8))
+
+        sprite_lbl = tk.Label(sp_box, text="Sin imagen seleccionada", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
+        sprite_lbl.pack(fill=tk.X, pady=(0, 6))
+
+        btn_row = tk.Frame(sp_box, bg="#FFFFFF")
+        btn_row.pack(fill=tk.X)
+
+        def refresh_sprite_label():
+            p = eyes_cfg.get("sprite") or ""
+            if p and os.path.exists(str(p)):
+                sprite_lbl.config(text=f"✅ {os.path.basename(str(p))}", fg="#15803D")
+            else:
+                sprite_lbl.config(text="❌ Sin imagen de pupilas", fg="#64748B")
+
+        def choose_eyes_png():
+            path = filedialog.askopenfilename(
+                parent=dlg,
+                title="Seleccionar imagen de pupilas (PNG transparente)",
+                filetypes=[("Imágenes PNG / WebP / GIF", "*.png *.webp *.gif"), ("Todos los archivos", "*.*")]
+            )
+            if not path:
+                return
+            eyes_dir = os.path.join(folder_path, "eyes")
+            os.makedirs(eyes_dir, exist_ok=True)
+            ext = os.path.splitext(path)[1].lower() or ".png"
+            dest = os.path.join(eyes_dir, f"pupils{ext}")
+            try:
+                if os.path.abspath(path) != os.path.abspath(dest):
+                    shutil.copy2(path, dest)
+            except Exception:
+                dest = path
+
+            eyes_cfg["sprite"] = dest
+            try:
+                eyes_cfg["sprite_rel"] = os.path.relpath(dest, folder_path).replace("\\", "/")
+            except Exception:
+                eyes_cfg["sprite_rel"] = ""
+            if not enabled_var.get():
+                enabled_var.set(True)
+                eyes_cfg["enabled"] = True
+                if hasattr(self, "w_indep_eyes_var"):
+                    self.w_indep_eyes_var.set(True)
+                    self._update_eyes_switch_style(True)
+            refresh_sprite_label()
+            load_eyes_pil()
+            commit_and_sync()
+            render_preview()
+
+        def clear_eyes_png():
+            eyes_cfg["sprite"] = ""
+            eyes_cfg["sprite_rel"] = ""
+            refresh_sprite_label()
+            load_eyes_pil()
+            commit_and_sync()
+            render_preview()
+
+        tk.Button(
+            btn_row, text="📂 Seleccionar Pupilas (PNG)", font=("Segoe UI", 8, "bold"),
+            bg="#E0F2FE", fg="#0369A1", relief="solid", bd=1, padx=10, pady=3, cursor="hand2",
+            command=choose_eyes_png
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            btn_row, text="🗑️ Quitar", font=("Segoe UI", 8),
+            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
+            command=clear_eyes_png
+        ).pack(side=tk.LEFT, padx=(6, 0))
+
+        # Máscara de recorte (Esclerótica) + Pestañas superiores (Estilo Anime)
+        tk.Frame(sp_box, height=1, bg="#E2E8F0").pack(fill=tk.X, pady=(8, 6))
+        tk.Label(
+            sp_box, text="Opcional (Estilo Anime / Recorte):",
+            font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#0369A1", anchor="w"
+        ).pack(fill=tk.X)
+
+        mask_lbl = tk.Label(sp_box, text="", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
+        mask_lbl.pack(fill=tk.X, pady=(2, 2))
+        mask_btn_row = tk.Frame(sp_box, bg="#FFFFFF")
+        mask_btn_row.pack(fill=tk.X, pady=(0, 4))
+
+        overlay_lbl = tk.Label(sp_box, text="", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
+        overlay_lbl.pack(fill=tk.X, pady=(4, 2))
+        overlay_btn_row = tk.Frame(sp_box, bg="#FFFFFF")
+        overlay_btn_row.pack(fill=tk.X)
+
+        show_mask_var = tk.BooleanVar(value=bool(eyes_cfg.get("show_mask", False)))
+
+        def refresh_extra_layer_labels():
+            mp = eyes_cfg.get("mask_sprite") or ""
+            if mp and os.path.exists(str(mp)):
+                mask_lbl.config(text=f"🎭 Máscara (Recorte): {os.path.basename(str(mp))}", fg="#15803D")
+            else:
+                mask_lbl.config(text="🎭 Máscara (Lo blanco del ojo): Ninguna", fg="#64748B")
+            op = eyes_cfg.get("overlay_sprite") or ""
+            if op and os.path.exists(str(op)):
+                overlay_lbl.config(text=f"✨ Pestañas / Contorno arriba: {os.path.basename(str(op))}", fg="#15803D")
+            else:
+                overlay_lbl.config(text="✨ Pestañas / Contorno arriba: Ninguno", fg="#64748B")
+
+        def choose_extra_eye_layer(cfg_key, rel_key, fname_base, title_txt):
+            path = filedialog.askopenfilename(
+                parent=dlg,
+                title=title_txt,
+                filetypes=[("Imágenes PNG / WebP / GIF", "*.png *.webp *.gif"), ("Todos los archivos", "*.*")]
+            )
+            if not path:
+                return
+            eyes_dir = os.path.join(folder_path, "eyes")
+            os.makedirs(eyes_dir, exist_ok=True)
+            ext = os.path.splitext(path)[1].lower() or ".png"
+            dest = os.path.join(eyes_dir, f"{fname_base}{ext}")
+            try:
+                if os.path.abspath(path) != os.path.abspath(dest):
+                    shutil.copy2(path, dest)
+            except Exception:
+                dest = path
+            eyes_cfg[cfg_key] = dest
+            try:
+                eyes_cfg[rel_key] = os.path.relpath(dest, folder_path).replace("\\", "/")
+            except Exception:
+                eyes_cfg[rel_key] = ""
+            refresh_extra_layer_labels()
+            load_eyes_pil()
+            commit_and_sync()
+            render_preview()
+
+        def clear_extra_eye_layer(cfg_key, rel_key):
+            eyes_cfg[cfg_key] = ""
+            eyes_cfg[rel_key] = ""
+            refresh_extra_layer_labels()
+            load_eyes_pil()
+            commit_and_sync()
+            render_preview()
+
+        def on_show_mask_toggle():
+            eyes_cfg["show_mask"] = bool(show_mask_var.get())
+            commit_and_sync()
+            render_preview()
+
+        tk.Button(
+            mask_btn_row, text="🎭 Cargar Máscara (Recorte)", font=("Segoe UI", 8),
+            bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+            command=lambda: choose_extra_eye_layer("mask_sprite", "mask_sprite_rel", "mask", "Seleccionar máscara de recorte (lo blanco del ojo)")
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            mask_btn_row, text="🗑️", font=("Segoe UI", 8),
+            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=6, pady=2, cursor="hand2",
+            command=lambda: clear_extra_eye_layer("mask_sprite", "mask_sprite_rel")
+        ).pack(side=tk.LEFT, padx=(4, 8))
+        tk.Checkbutton(
+            mask_btn_row, text="Dibujar blanco detrás", variable=show_mask_var, command=on_show_mask_toggle,
+            bg="#FFFFFF", fg="#334155", font=("Segoe UI", 8), cursor="hand2"
+        ).pack(side=tk.LEFT)
+
+        tk.Button(
+            overlay_btn_row, text="✨ Cargar Pestañas Arriba", font=("Segoe UI", 8),
+            bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+            command=lambda: choose_extra_eye_layer("overlay_sprite", "overlay_sprite_rel", "lashes", "Seleccionar pestañas / contorno superior (PNG)")
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            overlay_btn_row, text="🗑️", font=("Segoe UI", 8),
+            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=6, pady=2, cursor="hand2",
+            command=lambda: clear_extra_eye_layer("overlay_sprite", "overlay_sprite_rel")
+        ).pack(side=tk.LEFT, padx=(4, 0))
+
+        # Sección 2: Parámetros de seguimiento
+        trk_box = tk.LabelFrame(rc, text="2. Comportamiento del Seguimiento", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
+        trk_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        radius_var = tk.IntVar(value=int(eyes_cfg.get("mouse_radius", 12)))
+        smooth_var = tk.IntVar(value=int(eyes_cfg.get("smoothness", 35)))
+        sens_var = tk.IntVar(value=int(eyes_cfg.get("sensitivity", 300)))
+        bounce_var = tk.BooleanVar(value=bool(eyes_cfg.get("follows_bounce", True)))
+        hide_blink_var = tk.BooleanVar(value=bool(eyes_cfg.get("hide_on_blink", True)))
+
+        # Sección 3: Posición / Escala / Rotación
+        pos_box = tk.LabelFrame(rc, text="3. Posición, Tamaño y Pose", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
+        pos_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        ox_var = tk.IntVar(value=int(eyes_cfg.get("offset_x", 0)))
+        oy_var = tk.IntVar(value=int(eyes_cfg.get("offset_y", 0)))
+        sc_var = tk.IntVar(value=int(eyes_cfg.get("scale", 100)))
+        rot_var = tk.IntVar(value=int(eyes_cfg.get("rotation", 0)))
+        hidden_var = tk.BooleanVar(value=False)
+
+        state = {
+            "role": "idle",
+            "updating_vars": False,
+            "sync_job": None,
+            "drag_active": False,
+            "drag_start_xy": (0, 0),
+            "drag_orig_off": (0, 0),
+            "pil_cache": {},
+            "eyes_cache": EyesRenderCache(),
+            "eye_ox": 0.0,
+            "eye_oy": 0.0,
+        }
+
+        def load_eyes_pil():
+            state["eyes_cache"].load_pil_frame(eyes_cfg, flip_x=flip_x)
+
+        def get_avatar_pil(role):
+            if role in state["pil_cache"]:
+                return state["pil_cache"][role]
+            path = target_dict.get(f"{prefix}_{role}") or target_dict.get(f"{prefix}_idle")
+            if path and os.path.exists(str(path)):
+                try:
+                    im = Image.open(path).convert("RGBA")
+                    if flip_x:
+                        im = im.transpose(Image.FLIP_LEFT_RIGHT)
+                    state["pil_cache"][role] = im
+                    return im
+                except Exception:
+                    pass
+            state["pil_cache"][role] = None
+            return None
+
+        def commit_and_sync(immediate=False):
+            if state["sync_job"]:
+                try:
+                    dlg.after_cancel(state["sync_job"])
+                except Exception:
+                    pass
+                state["sync_job"] = None
+            if immediate:
+                self._apply_independent_eyes_to_character(curr_name, eyes_cfg)
+            else:
+                state["sync_job"] = dlg.after(160, lambda: self._apply_independent_eyes_to_character(curr_name, eyes_cfg))
+
+        def commit_tracking_change(*_a):
+            if state["updating_vars"]:
+                return
+            eyes_cfg["mouse_radius"] = int(radius_var.get())
+            eyes_cfg["smoothness"] = int(smooth_var.get())
+            eyes_cfg["sensitivity"] = int(sens_var.get())
+            eyes_cfg["follows_bounce"] = bool(bounce_var.get())
+            eyes_cfg["hide_on_blink"] = bool(hide_blink_var.get())
+            commit_and_sync()
+            render_preview()
+
+        def commit_position_change(*_a):
+            if state["updating_vars"]:
+                return
+            r = state["role"]
+            ox = int(ox_var.get())
+            oy = int(oy_var.get())
+            sc = int(sc_var.get())
+            rot = int(rot_var.get())
+            hid = bool(hidden_var.get())
+            if r == "idle":
+                eyes_cfg["offset_x"] = ox
+                eyes_cfg["offset_y"] = oy
+                eyes_cfg["scale"] = sc
+                eyes_cfg["rotation"] = rot
+            else:
+                ov = eyes_cfg.setdefault("frame_overrides", {})
+                ov[r] = {"offset_x": ox, "offset_y": oy, "scale": sc, "rotation": rot, "hidden": hid}
+            commit_and_sync()
+            render_preview()
+
+        def load_controls_for_role(role):
+            state["role"] = role
+            state["updating_vars"] = True
+            hid, ox, oy, sc, rot, _ = resolve_eyes_frame_config(eyes_cfg, role)
+            ox_var.set(ox)
+            oy_var.set(oy)
+            sc_var.set(sc)
+            rot_var.set(rot)
+            hidden_var.set(hid)
+            state["updating_vars"] = False
+            render_preview()
+
+        def add_slider(parent, label, var, lo, hi, cmd):
+            row = tk.Frame(parent, bg="#FFFFFF")
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, width=19, anchor="w", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+            val_lbl = tk.Label(row, text=str(var.get()), width=5, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#0369A1")
+            val_lbl.pack(side=tk.RIGHT)
+
+            def on_s(v):
+                val_lbl.config(text=str(int(float(v))))
+                cmd()
+
+            s = ttk.Scale(row, from_=lo, to=hi, orient=tk.HORIZONTAL, variable=var, command=on_s)
+            s.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=4)
+            return val_lbl
+
+        add_slider(trk_box, "Rango de movimiento (px):", radius_var, 1, 80, commit_tracking_change)
+        add_slider(trk_box, "Suavizado (%):", smooth_var, 5, 100, commit_tracking_change)
+        add_slider(trk_box, "Distancia sensibilidad:", sens_var, 50, 900, commit_tracking_change)
+
+        chk_row = tk.Frame(trk_box, bg="#FFFFFF")
+        chk_row.pack(fill=tk.X, pady=(4, 0))
+        tk.Checkbutton(
+            chk_row, text="Seguir rebote", variable=bounce_var, command=commit_tracking_change,
+            bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(side=tk.LEFT)
+        tk.Checkbutton(
+            chk_row, text="Ocultar al pestañear", variable=hide_blink_var, command=commit_tracking_change,
+            bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
+        add_slider(pos_box, "Posición X:", ox_var, -180, 180, commit_position_change)
+        add_slider(pos_box, "Posición Y:", oy_var, -180, 180, commit_position_change)
+        add_slider(pos_box, "Escala (%):", sc_var, 10, 280, commit_position_change)
+        add_slider(pos_box, "Rotación (°):", rot_var, -180, 180, commit_position_change)
+
+        pose_opt_row = tk.Frame(pos_box, bg="#FFFFFF")
+        pose_opt_row.pack(fill=tk.X, pady=(4, 0))
+        tk.Checkbutton(
+            pose_opt_row, text="Ocultar pupilas solo en esta pose", variable=hidden_var, command=commit_position_change,
+            bg="#FFFFFF", fg="#991B1B", font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(side=tk.LEFT)
+
+        def reset_pose_override():
+            r = state["role"]
+            if r == "idle":
+                eyes_cfg["offset_x"] = 0
+                eyes_cfg["offset_y"] = 0
+                eyes_cfg["scale"] = 100
+                eyes_cfg["rotation"] = 0
+            else:
+                (eyes_cfg.get("frame_overrides") or {}).pop(r, None)
+            load_controls_for_role(r)
+            commit_and_sync()
+
+        tk.Button(
+            pose_opt_row, text="Restablecer pose", font=("Segoe UI", 8),
+            bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+            command=reset_pose_override
+        ).pack(side=tk.RIGHT)
+
+        def render_preview():
+            if not dlg.winfo_exists():
+                return
+            preview_canvas.delete("all")
+            r = state["role"]
+            av_pil = get_avatar_pil(r)
+            pos_scale = max(20, prev_size - 16) / 384.0
+            cx, cy = prev_size // 2, prev_size // 2
+
+            if av_pil:
+                avail = prev_size - 16
+                ratio = min(avail / av_pil.width, avail / av_pil.height)
+                nw, nh = max(4, int(av_pil.width * ratio)), max(4, int(av_pil.height * ratio))
+                av_tk = ImageTk.PhotoImage(av_pil.resize((nw, nh), Image.Resampling.LANCZOS))
+                preview_canvas.create_image(cx, cy, anchor=tk.CENTER, image=av_tk)
+                preview_canvas._av_tk = av_tk
+
+            hid, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(eyes_cfg, r)
+            if not hid and state["eyes_cache"].pil_img is not None:
+                eff_ox = -ox if flip_x else ox
+                bx = cx + int(eff_ox * pos_scale)
+                by = cy + int(oy * pos_scale)
+
+                if live_test_var.get() and not state["drag_active"]:
+                    state["eye_ox"], state["eye_oy"] = compute_mouse_eye_offset(
+                        preview_canvas, bx, by, pos_scale, eyes_cfg, state["eye_ox"], state["eye_oy"]
+                    )
+                else:
+                    state["eye_ox"], state["eye_oy"] = 0.0, 0.0
+
+                eff_rot = -rot_deg if flip_x else rot_deg
+                e_tk, anchored = state["eyes_cache"].get_tk_image(
+                    pos_scale,
+                    scale_pct=sc_pct,
+                    rotation=eff_rot,
+                    eye_ox=state["eye_ox"],
+                    eye_oy=state["eye_oy"],
+                    show_mask=bool(eyes_cfg.get("show_mask", False)),
+                )
+                if e_tk is not None:
+                    ex, ey = (bx, by) if anchored else (bx + state["eye_ox"], by + state["eye_oy"])
+                    rad_px = max(2, int(eyes_cfg.get("mouse_radius", 12) * pos_scale))
+                    preview_canvas.create_oval(
+                        bx - rad_px, by - rad_px, bx + rad_px, by + rad_px,
+                        outline="#38BDF8", dash=(3, 3), width=1
+                    )
+                    preview_canvas.create_image(ex, ey, anchor=tk.CENTER, image=e_tk)
+                    preview_canvas._e_tk = e_tk
+
+        def tick_preview_loop():
+            if not dlg.winfo_exists():
+                return
+            if live_test_var.get() and not state["drag_active"] and state["eyes_cache"].pil_img is not None:
+                render_preview()
+            dlg.after(30, tick_preview_loop)
+
+        def on_pose_selected(_e=None):
+            load_controls_for_role(label_to_role.get(pose_var.get(), "idle"))
+
+        pose_combo.bind("<<ComboboxSelected>>", on_pose_selected)
+
+        def on_canvas_down(event):
+            state["drag_active"] = True
+            state["drag_start_xy"] = (event.x, event.y)
+            state["drag_orig_off"] = (ox_var.get(), oy_var.get())
+
+        def on_canvas_move(event):
+            if not state["drag_active"]:
+                return
+            pos_scale = max(20, prev_size - 16) / 384.0
+            dx_px = event.x - state["drag_start_xy"][0]
+            dy_px = event.y - state["drag_start_xy"][1]
+            dx_off = int(round(dx_px / max(0.1, pos_scale)))
+            if flip_x:
+                dx_off = -dx_off
+            dy_off = int(round(dy_px / max(0.1, pos_scale)))
+            state["updating_vars"] = True
+            ox_var.set(max(-180, min(180, state["drag_orig_off"][0] + dx_off)))
+            oy_var.set(max(-180, min(180, state["drag_orig_off"][1] + dy_off)))
+            state["updating_vars"] = False
+            commit_position_change()
+
+        def on_canvas_up(_event):
+            state["drag_active"] = False
+
+        def on_canvas_wheel(event):
+            num = getattr(event, "num", None)
+            if num == 4:
+                step = 5
+            elif num == 5:
+                step = -5
+            else:
+                step = 5 if getattr(event, "delta", 0) > 0 else -5
+            new_sc = max(10, min(280, int(sc_var.get()) + step))
+            if new_sc != sc_var.get():
+                state["updating_vars"] = True
+                sc_var.set(new_sc)
+                state["updating_vars"] = False
+                commit_position_change()
+
+        preview_canvas.bind("<ButtonPress-1>", on_canvas_down)
+        preview_canvas.bind("<B1-Motion>", on_canvas_move)
+        preview_canvas.bind("<ButtonRelease-1>", on_canvas_up)
+        preview_canvas.bind("<MouseWheel>", on_canvas_wheel)
+        preview_canvas.bind("<Button-4>", on_canvas_wheel)
+        preview_canvas.bind("<Button-5>", on_canvas_wheel)
+
+        tk.Button(
+            main_f, text="✅ Listo", font=("Segoe UI", 9, "bold"),
+            bg="#16A34A", fg="#FFFFFF", activebackground="#15803D", activeforeground="#FFFFFF",
+            relief="solid", bd=1, padx=16, pady=5, cursor="hand2",
+            command=dlg.destroy
+        ).pack(side=tk.BOTTOM, anchor=tk.E, pady=(8, 0))
+
+        refresh_sprite_label()
+        refresh_extra_layer_labels()
+        load_eyes_pil()
+        load_controls_for_role("idle")
+        dlg.after(30, tick_preview_loop)

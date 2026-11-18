@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from PIL import Image, ImageTk
 import json
@@ -7,6 +7,7 @@ import shutil
 
 from core.app_constants import PROFILES_FILE, CONFIG_FILE, CHARACTERS_DIR, log_debug
 from core.lipsync import normalize_independent_mouth
+from core.eyes import normalize_independent_eyes
 
 
 class CharacterManagerMixin:
@@ -478,16 +479,25 @@ class CharacterManagerMixin:
                         p2_dict[f"a2_{r_id}_motion"] = ex["motion"]
 
         loaded_mouth = normalize_independent_mouth(meta_disk.get("independent_mouth"), folder_path=folder_path)
+        loaded_eyes = normalize_independent_eyes(meta_disk.get("independent_eyes"), folder_path=folder_path)
         if isinstance(p1_dict, dict):
             if "independent_mouth" not in p1_dict or not isinstance(p1_dict["independent_mouth"], dict):
                 p1_dict["independent_mouth"] = normalize_independent_mouth(loaded_mouth, folder_path=folder_path)
             else:
                 p1_dict["independent_mouth"] = normalize_independent_mouth(p1_dict["independent_mouth"], folder_path=folder_path)
+            if "independent_eyes" not in p1_dict or not isinstance(p1_dict["independent_eyes"], dict):
+                p1_dict["independent_eyes"] = normalize_independent_eyes(loaded_eyes, folder_path=folder_path)
+            else:
+                p1_dict["independent_eyes"] = normalize_independent_eyes(p1_dict["independent_eyes"], folder_path=folder_path)
         if isinstance(p2_dict, dict):
             if "independent_mouth" not in p2_dict or not isinstance(p2_dict["independent_mouth"], dict):
                 p2_dict["independent_mouth"] = normalize_independent_mouth(loaded_mouth, folder_path=folder_path)
             else:
                 p2_dict["independent_mouth"] = normalize_independent_mouth(p2_dict["independent_mouth"], folder_path=folder_path)
+            if "independent_eyes" not in p2_dict or not isinstance(p2_dict["independent_eyes"], dict):
+                p2_dict["independent_eyes"] = normalize_independent_eyes(loaded_eyes, folder_path=folder_path)
+            else:
+                p2_dict["independent_eyes"] = normalize_independent_eyes(p2_dict["independent_eyes"], folder_path=folder_path)
 
         # Cargar animaciones y velocidades asignadas por expresión
         saved_motions = meta_disk.get("motions", {})
@@ -588,6 +598,13 @@ class CharacterManagerMixin:
             raw_mouth = p2_dict.get("independent_mouth")
         clean_mouth = normalize_independent_mouth(raw_mouth, folder_path=folder_path)
 
+        raw_eyes = None
+        if isinstance(p1_dict, dict) and isinstance(p1_dict.get("independent_eyes"), dict):
+            raw_eyes = p1_dict.get("independent_eyes")
+        elif isinstance(p2_dict, dict) and isinstance(p2_dict.get("independent_eyes"), dict):
+            raw_eyes = p2_dict.get("independent_eyes")
+        clean_eyes = normalize_independent_eyes(raw_eyes, folder_path=folder_path)
+
         meta = {
             "name": name,
             "image_mode": p1_dict.get("image_mode", p2_dict.get("image_mode", "4_states")),
@@ -598,6 +615,7 @@ class CharacterManagerMixin:
             "props": clean_props,
             "extra_expressions": clean_extras,
             "independent_mouth": clean_mouth,
+            "independent_eyes": clean_eyes,
             "motions": motions_map,
             "motion_speeds": speeds_map,
             "expressions": {

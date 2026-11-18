@@ -1,16 +1,215 @@
-import pyaudiowpatch as pyaudio
+try:
+    import pyaudiowpatch as pyaudio
+except ImportError:
+    import pyaudio
 import numpy as np
 import threading
 import time
+import sys
+import os
 import psutil
+import json
+import shutil
+import subprocess
+from types import SimpleNamespace
 from typing import Optional, List, Dict
 
-try:
-    from process_audio_capture import ProcessAudioCapture
-    PROCESS_CAPTURE_AVAILABLE = ProcessAudioCapture.is_supported()
-except Exception as e:
-    print(f"[AudioEngine] process_audio_capture no disponible: {e}")
-    PROCESS_CAPTURE_AVAILABLE = False
+
+class PipeWireAudioCapture:
+    """Implementación de captura aislada de audio por proceso para Linux usando PipeWire."""
+    IGNORE_BINARIES = {
+        'pw-dump', 'pw-record', 'pw-link', 'pw-cli', 'wireplumber', 'pipewire',
+        'mutter', 'gnome-shell', 'gsd-media-keys', 'xdg-desktop-portal', 'cava',
+        'python', 'python3', 'python3.14', 'antigravity', 'antigravity-ide'
+    }
+
+    @classmethod
+    def is_supported(cls):
+        return bool(shutil.which('pw-record') and shutil.which('pw-dump'))
+
+    @classmethod
+    def enumerate_audio_processes(cls):
+        try:
+            dump = json.loads(subprocess.check_output(['pw-dump'], stderr=subprocess.DEVNULL))
+        except Exception:
+            return []
+
+        clients = {}
+        nodes = []
+        for obj in dump:
+            t = obj.get('type')
+            props = obj.get('info', {}).get('props', {})
+            if t == 'PipeWire:Interface:Client':
+                cid = obj.get('id')
+                clients[cid] = {
+                    'name': props.get('application.name') or props.get('node.name') or '',
+                    'binary': props.get('application.process.binary') or '',
+                    'pid': props.get('application.process.id')
+                }
+            elif t == 'PipeWire:Interface:Node' and props.get('media.class') == 'Stream/Output/Audio':
+                nodes.append({
+                    'serial': props.get('object.serial', obj.get('id')),
+                    'client_id': props.get('client.id'),
+                    'app_name': props.get('application.name', '')
+                })
+
+        procs = []
+        seen_pids = set()
+        seen_names = set()
+
+        # 1. Aplicaciones con streams de audio activos en este instante
+        for n in nodes:
+            c = clients.get(n['client_id'], {})
+            raw_name = n.get('app_name') or c.get('name') or c.get('binary')
+            if not raw_name:
+                continue
+            name = raw_name.capitalize()
+            low_name = name.lower()
+            if any(ig in low_name for ig in cls.IGNORE_BINARIES):
+                continue
+
+            pid = c.get('pid')
+            if pid:
+                try:
+                    pid = int(pid)
+                    if pid == os.getpid():
+                        continue
+                    if pid not in seen_pids:
+                        seen_pids.add(pid)
+                        seen_names.add(low_name)
+                        procs.append(SimpleNamespace(pid=pid, name=name, window_title='En reproducción'))
+                except Exception:
+                    pass
+
+        # 2. Clientes de audio conectados a PipeWire (ej: Brave, Discord, Spotify en reposo)
+        for c in clients.values():
+            raw_name = c.get('binary') or c.get('name')
+            if not raw_name:
+                continue
+            name = raw_name.capitalize()
+            low_name = name.lower()
+            if low_name in seen_names or any(ig in low_name for ig in cls.IGNORE_BINARIES):
+                continue
+            if any(ig in low_name for ig in ['input', 'hardware_mute', 'volume control']):
+                continue
+
+            pid = c.get('pid')
+            if pid:
+                try:
+                    pid = int(pid)
+                    if pid == os.getpid():
+                        continue
+                    if pid not in seen_pids:
+                        seen_pids.add(pid)
+                        seen_names.add(low_name)
+                        procs.append(SimpleNamespace(pid=pid, name=name, window_title=''))
+                except Exception:
+                    pass
+
+        return procs
+
+    def __init__(self, pid=None, level_callback=None):
+        self.pid = int(pid) if pid is not None else None
+        self.level_callback = level_callback or (lambda db: None)
+        self.running = False
+        self.thread = None
+        self.proc = None
+
+    def start(self):
+        self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+        if self.proc:
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
+            self.proc = None
+
+    def _find_target_serial(self):
+        try:
+            dump = json.loads(subprocess.check_output(['pw-dump'], stderr=subprocess.DEVNULL))
+        except Exception:
+            return None
+
+        target_clients = set()
+        for obj in dump:
+            if obj.get('type') == 'PipeWire:Interface:Client':
+                props = obj.get('info', {}).get('props', {})
+                cid = obj.get('id')
+                cpid = props.get('application.process.id')
+                if self.pid is not None and cpid is not None:
+                    try:
+                        if int(cpid) == self.pid:
+                            target_clients.add(cid)
+                    except Exception:
+                        pass
+
+        for obj in dump:
+            if obj.get('type') == 'PipeWire:Interface:Node':
+                props = obj.get('info', {}).get('props', {})
+                if props.get('media.class') == 'Stream/Output/Audio':
+                    if props.get('client.id') in target_clients:
+                        return props.get('object.serial', obj.get('id'))
+
+        return None
+
+    def _run(self):
+        while self.running:
+            serial = self._find_target_serial()
+            if not serial:
+                self.level_callback(-60.0)
+                time.sleep(0.5)
+                continue
+
+            cmd = [
+                'pw-record',
+                '--target', str(serial),
+                '--raw',
+                '--rate', '48000',
+                '--channels', '2',
+                '--format', 's16',
+                '-'
+            ]
+            try:
+                self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                while self.running and self.proc.poll() is None:
+                    data = self.proc.stdout.read(2048)
+                    if not data:
+                        break
+                    arr = np.frombuffer(data, dtype=np.int16)
+                    if len(arr) > 0:
+                        rms = float(np.sqrt(np.mean(arr.astype(np.float32)**2)))
+                        pct = min(100.0, max(0.0, (rms / 4000.0) * 100.0))
+                        db = (pct * 0.6) - 60.0
+                        self.level_callback(db)
+            except Exception:
+                pass
+            finally:
+                if self.proc:
+                    try:
+                        self.proc.terminate()
+                    except Exception:
+                        pass
+                    self.proc = None
+
+            if self.running:
+                time.sleep(0.3)
+
+
+if sys.platform.startswith("win"):
+    try:
+        from process_audio_capture import ProcessAudioCapture
+        PROCESS_CAPTURE_AVAILABLE = ProcessAudioCapture.is_supported()
+    except Exception as e:
+        print(f"[AudioEngine] process_audio_capture no disponible: {e}")
+        PROCESS_CAPTURE_AVAILABLE = False
+else:
+    ProcessAudioCapture = PipeWireAudioCapture
+    PROCESS_CAPTURE_AVAILABLE = PipeWireAudioCapture.is_supported()
 
 
 class AudioEngine:
@@ -79,8 +278,13 @@ class AudioEngine:
 
         for i in range(self.p.get_device_count()):
             dev = self.p.get_device_info_by_index(i)
-            if dev.get('maxInputChannels', 0) > 0 and not dev.get('isLoopbackDevice', False):
-                name = dev['name']
+            name = dev['name']
+            name_lower = name.lower()
+            is_loopback = (
+                dev.get('isLoopbackDevice', False)
+                or (not sys.platform.startswith("win") and ('.monitor' in name_lower or 'monitor of' in name_lower))
+            )
+            if dev.get('maxInputChannels', 0) > 0 and not is_loopback:
                 is_default = (i == default_index)
                 devices.append({
                     'index': i,
@@ -119,29 +323,69 @@ class AudioEngine:
             except Exception as e:
                 print(f"[AudioEngine] Error enumerando procesos con audio: {e}")
 
+        # En Linux/PipeWire, detectar cuál es el sink/monitor predeterminado del sistema
+        pipewire_default_monitor = None
+        if not sys.platform.startswith("win"):
+            try:
+                import subprocess, re
+                wp_out = subprocess.check_output(['wpctl', 'status'], text=True, stderr=subprocess.DEVNULL)
+                m_def = re.search(r'Audio/Sink\s+([\w\.\-]+)', wp_out)
+                if m_def:
+                    pipewire_default_monitor = m_def.group(1).lower()
+            except Exception:
+                pass
+
         default_out_name = ""
         try:
             default_out = self.p.get_default_output_device_info()
-            default_out_name = default_out['name']
+            default_out_name = (default_out.get('name') or "").lower()
         except Exception:
             pass
 
+        loopback_sources = []
+        input_sources = []
+
         for i in range(self.p.get_device_count()):
             dev = self.p.get_device_info_by_index(i)
-            if dev.get('isLoopbackDevice', False):
-                name = dev['name']
-                is_default = default_out_name and (default_out_name in name)
-                sources.append({
+            name = dev['name']
+            name_lower = name.lower()
+
+            is_loopback = (
+                dev.get('isLoopbackDevice', False)
+                or (not sys.platform.startswith("win") and ('.monitor' in name_lower or 'monitor of' in name_lower))
+            )
+
+            if is_loopback:
+                is_default = False
+                if pipewire_default_monitor and pipewire_default_monitor in name_lower:
+                    is_default = True
+                elif default_out_name and default_out_name in name_lower:
+                    is_default = True
+
+                if not sys.platform.startswith("win"):
+                    clean_name = name.replace('.monitor', '').replace('alsa_output.', '')
+                    try:
+                        import re
+                        clean_name = re.sub(r'pci-[0-9a-fA-F:\.]+\.', '', clean_name)
+                    except Exception:
+                        pass
+                    display_name = f"🔊 Salida de PC / Discord ({clean_name})"
+                else:
+                    display_name = f"🔊 Todo el audio: {name}"
+
+                if is_default:
+                    display_name += " [Altavoces Actuales / Recomendado]"
+
+                loopback_sources.append({
                     'type': 'device_loopback',
                     'id': f"dev:{i}",
                     'index': i,
-                    'name': f"🔊 Todo el audio: {name}{' (Altavoces Actuales)' if is_default else ''}",
+                    'name': display_name,
                     'raw_name': name,
                     'is_default': is_default
                 })
             elif dev.get('maxInputChannels', 0) > 0:
-                name = dev['name']
-                sources.append({
+                input_sources.append({
                     'type': 'device_input',
                     'id': f"dev:{i}",
                     'index': i,
@@ -149,6 +393,11 @@ class AudioEngine:
                     'raw_name': name,
                     'is_default': False
                 })
+
+        # Mostrar las salidas de audio y monitor de primero (con la predeterminada al frente)
+        loopback_sources.sort(key=lambda s: not s.get('is_default', False))
+        sources.extend(loopback_sources)
+        sources.extend(input_sources)
 
         return sources
 
@@ -345,7 +594,7 @@ class AudioEngine:
     def _start_device_discord_stream(self, dev_index):
         try:
             dev_info = self.p.get_device_info_by_index(dev_index)
-            channels = max(1, dev_info['maxInputChannels'])
+            channels = min(2, max(1, dev_info['maxInputChannels']))
             rate = int(dev_info['defaultSampleRate'])
 
             self.discord_stream = self.p.open(

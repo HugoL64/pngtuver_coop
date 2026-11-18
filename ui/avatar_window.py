@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from PIL import Image, ImageTk
 import os
 import random
@@ -12,9 +12,15 @@ from core.lipsync import (
     is_independent_mouth_active,
     resolve_mouth_frame_config,
 )
+from core.eyes import (
+    EyesRenderCache,
+    compute_mouse_eye_offset,
+    is_independent_eyes_active,
+    resolve_eyes_frame_config,
+)
 
 class AvatarWindow(tk.Toplevel):
-    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False, independent_mouth=None, perf_mode="performance"):
+    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False, independent_mouth=None, independent_eyes=None, perf_mode="performance"):
         super().__init__(master)
 
         self.title(title)
@@ -75,6 +81,11 @@ class AvatarWindow(tk.Toplevel):
         self.mouth_item = None
         self._mouth_slot = "closed"
         self._mouth_squash = 0
+        self.independent_eyes = independent_eyes or {}
+        self.eyes_cache = EyesRenderCache()
+        self.eyes_item = None
+        self._eye_ox = 0.0
+        self._eye_oy = 0.0
         self._load_gen = 0
         self.perf_mode = perf_mode or "performance"
 
@@ -213,6 +224,7 @@ class AvatarWindow(tk.Toplevel):
         self.cached_images = raw_imgs
         self.cached_props = raw_props
         self.mouth_cache = mouth_cache_bg
+        self.eyes_cache.load_pil_frame(self.independent_eyes, flip_x=self.flip_x)
         self._last_window_size = (w, h)
         self.photo_cache.clear()
         self.base_resized_images.clear()
@@ -433,7 +445,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_props = new_photos
         self._update_display()
 
-    def update_images(self, image_dict, mode_4_states, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=None, independent_mouth=None):
+    def update_images(self, image_dict, mode_4_states, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=None, independent_mouth=None, independent_eyes=None):
         self.images_paths = image_dict or {}
         self.mode_4_states = mode_4_states
         if props_list is not None:
@@ -448,6 +460,8 @@ class AvatarWindow(tk.Toplevel):
             self.flip_x = bool(flip_x)
         if independent_mouth is not None:
             self.independent_mouth = independent_mouth
+        if independent_eyes is not None:
+            self.independent_eyes = independent_eyes
         self.talk_start_time = 0.0
         self.talk_end_time = 0.0
         self.scream_start_time = 0.0
@@ -845,6 +859,9 @@ class AvatarWindow(tk.Toplevel):
                 self._mouth_squash = new_msquash
                 self._update_display()
 
+        if is_independent_eyes_active(self.independent_eyes):
+            self._tick_eyes_mouse_follow()
+
         self.after(16, self._animate_loop)
 
     def _get_squash_photo(self, active_key, frame_idx):
@@ -1119,6 +1136,7 @@ class AvatarWindow(tk.Toplevel):
         av_cx, av_cy, pos_scale = self._get_avatar_center_and_scale(w, h, padding)
 
         # 2. Mover cada accesorio según si sigue o no el rebote
+        self._update_eyes_position_only(av_cx, av_cy, pos_scale, active_key)
         self._update_mouth_position_only(av_cx, av_cy, pos_scale, active_key)
         for p in self.photo_props:
             item_id = self.prop_canvas_items.get(p["id"])
@@ -1207,6 +1225,7 @@ class AvatarWindow(tk.Toplevel):
                 self.canvas.coords(self.placeholder_item, w // 2, h // 2)
 
         # 3. DIBUJAR ACCESORIOS DE FRENTE (FRONT PROPS)
+        eyes_canvas_item = self._render_eyes_item(av_cx, av_cy, pos_scale, active_key)
         mouth_canvas_item = self._render_mouth_item(av_cx, av_cy, pos_scale, active_key)
         front_items = []
         for p in self.photo_props:
@@ -1221,6 +1240,9 @@ class AvatarWindow(tk.Toplevel):
             for b_it in back_items:
                 self.canvas.tag_lower(b_it, self.image_item)
             prev_it = self.image_item
+            if eyes_canvas_item is not None:
+                self.canvas.tag_raise(eyes_canvas_item, prev_it)
+                prev_it = eyes_canvas_item
             if mouth_canvas_item is not None:
                 self.canvas.tag_raise(mouth_canvas_item, prev_it)
                 prev_it = mouth_canvas_item
@@ -1336,6 +1358,100 @@ class AvatarWindow(tk.Toplevel):
             self.canvas.coords(self.mouth_item, mx, my)
         self.canvas.current_mouth_photo = m_photo
         return self.mouth_item
+
+    def update_independent_eyes_fast(self, eyes_cfg):
+        self.independent_eyes = eyes_cfg or {}
+        self.eyes_cache.load_pil_frame(self.independent_eyes, flip_x=self.flip_x)
+        self._update_display()
+
+    def _get_eyes_base_coords(self, av_cx, av_cy, pos_scale, ox, oy):
+        eff_ox = -ox if self.flip_x else ox
+        dx = int(eff_ox * pos_scale)
+        dy = int(oy * pos_scale)
+        if self.independent_eyes.get("follows_bounce", True):
+            return av_cx + dx + self.jitter_x, av_cy + dy + int(self.current_offset_y) + self.jitter_y
+        return av_cx + dx, av_cy + dy
+
+    def _tick_eyes_mouse_follow(self):
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w <= 20 or h <= 20:
+            w, h = 450, 550
+        av_cx, av_cy, pos_scale = self._get_avatar_center_and_scale(w, h, 20)
+        active_key = self._get_active_key()
+        self._update_eyes_position_only(av_cx, av_cy, pos_scale, active_key)
+
+    def _update_eyes_position_only(self, av_cx, av_cy, pos_scale, active_key):
+        if self.eyes_item is None:
+            return
+        if not is_independent_eyes_active(self.independent_eyes):
+            self.canvas.itemconfig(self.eyes_item, state="hidden")
+            return
+        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, active_key)
+        if hidden:
+            self.canvas.itemconfig(self.eyes_item, state="hidden")
+            return
+        bx, by = self._get_eyes_base_coords(av_cx, av_cy, pos_scale, ox, oy)
+        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
+            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
+        )
+        if self.eyes_cache.has_mask_or_overlay():
+            eff_rot = -rot_deg if self.flip_x else rot_deg
+            e_photo, anchored = self.eyes_cache.get_tk_image(
+                pos_scale,
+                scale_pct=sc_pct,
+                rotation=eff_rot,
+                eye_ox=self._eye_ox,
+                eye_oy=self._eye_oy,
+                show_mask=bool(self.independent_eyes.get("show_mask", False)),
+            )
+            if e_photo is not None:
+                self.canvas.itemconfig(self.eyes_item, image=e_photo, state="normal")
+                self.canvas.current_eyes_photo = e_photo
+            ex, ey = (bx, by) if anchored else (bx + self._eye_ox, by + self._eye_oy)
+            self.canvas.coords(self.eyes_item, ex, ey)
+        else:
+            self.canvas.coords(self.eyes_item, bx + self._eye_ox, by + self._eye_oy)
+            self.canvas.itemconfig(self.eyes_item, state="normal")
+
+    def _render_eyes_item(self, av_cx, av_cy, pos_scale, active_key):
+        if not is_independent_eyes_active(self.independent_eyes):
+            if self.eyes_item is not None:
+                self.canvas.itemconfig(self.eyes_item, state="hidden")
+            return None
+
+        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, active_key)
+        if hidden:
+            if self.eyes_item is not None:
+                self.canvas.itemconfig(self.eyes_item, state="hidden")
+            return None
+
+        bx, by = self._get_eyes_base_coords(av_cx, av_cy, pos_scale, ox, oy)
+        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
+            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
+        )
+        eff_rot = -rot_deg if self.flip_x else rot_deg
+        e_photo, anchored = self.eyes_cache.get_tk_image(
+            pos_scale,
+            scale_pct=sc_pct,
+            rotation=eff_rot,
+            eye_ox=self._eye_ox,
+            eye_oy=self._eye_oy,
+            show_mask=bool(self.independent_eyes.get("show_mask", False)),
+        )
+        if e_photo is None:
+            if self.eyes_item is not None:
+                self.canvas.itemconfig(self.eyes_item, state="hidden")
+            return None
+
+        ex, ey = (bx, by) if anchored else (bx + self._eye_ox, by + self._eye_oy)
+        if self.eyes_item is None:
+            self.eyes_item = self.canvas.create_image(ex, ey, anchor=tk.CENTER, image=e_photo)
+        else:
+            self.canvas.itemconfig(self.eyes_item, image=e_photo, state="normal")
+            self.canvas.coords(self.eyes_item, ex, ey)
+        self.canvas.current_eyes_photo = e_photo
+        return self.eyes_item
 
     def _render_current_frame(self):
         """Compatibilidad con llamadas externas existentes."""

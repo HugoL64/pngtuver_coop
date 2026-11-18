@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 import random
@@ -693,6 +693,7 @@ class ObsAndAlertsMixin:
             extra_expressions=self.p1_data.get("extra_expressions", []),
             flip_x=bool(self.p1_data.get("flip_x", False)),
             independent_mouth=self.p1_data.get("independent_mouth"),
+            independent_eyes=self.p1_data.get("independent_eyes"),
             perf_mode=self.global_config.get("performance_mode", "performance"),
         )
         self.avatar1_window.squash_enabled = self.global_config.get("squash_enabled", True)
@@ -727,6 +728,7 @@ class ObsAndAlertsMixin:
             extra_expressions=self.p2_data.get("extra_expressions", []),
             flip_x=bool(self.p2_data.get("flip_x", False)),
             independent_mouth=self.p2_data.get("independent_mouth"),
+            independent_eyes=self.p2_data.get("independent_eyes"),
             perf_mode=self.global_config.get("performance_mode", "performance"),
         )
         self.avatar2_window.squash_enabled = self.global_config.get("squash_enabled", True)
@@ -811,7 +813,8 @@ class ObsAndAlertsMixin:
                 motion_speeds_map=self._get_motion_speeds_dict(1),
                 extra_expressions=self.p1_data.get("extra_expressions", []),
                 flip_x=bool(self.p1_data.get("flip_x", False)),
-                independent_mouth=self.p1_data.get("independent_mouth")
+                independent_mouth=self.p1_data.get("independent_mouth"),
+                independent_eyes=self.p1_data.get("independent_eyes")
             )
 
         if self.avatar2_window and self.avatar2_window.winfo_exists():
@@ -823,7 +826,8 @@ class ObsAndAlertsMixin:
                 motion_speeds_map=self._get_motion_speeds_dict(2),
                 extra_expressions=self.p2_data.get("extra_expressions", []),
                 flip_x=bool(self.p2_data.get("flip_x", False)),
-                independent_mouth=self.p2_data.get("independent_mouth")
+                independent_mouth=self.p2_data.get("independent_mouth"),
+                independent_eyes=self.p2_data.get("independent_eyes")
             )
 
     def _on_window_hotkey(self, avatar_num, action):

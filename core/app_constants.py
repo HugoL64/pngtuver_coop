@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk
 import os
 import sys
@@ -49,16 +49,28 @@ class ScrollableFrame(tk.Frame):
         ScrollableFrame._active_instances.append(self)
         if not ScrollableFrame._wheel_bound:
             ScrollableFrame._wheel_bound = True
-            self.winfo_toplevel().bind_all("<MouseWheel>", ScrollableFrame._global_mousewheel)
+            top = self.winfo_toplevel()
+            # Windows y macOS
+            top.bind_all("<MouseWheel>", ScrollableFrame._global_mousewheel)
+            # Linux (X11 y Wayland)
+            top.bind_all("<Button-4>", ScrollableFrame._global_mousewheel)
+            top.bind_all("<Button-5>", ScrollableFrame._global_mousewheel)
 
     @classmethod
     def _global_mousewheel(cls, event):
+        # Limpiar referencias de instancias destruidas
+        cls._active_instances = [inst for inst in cls._active_instances if inst.winfo_exists()]
+
         try:
             top = event.widget.winfo_toplevel()
             w = top.winfo_containing(event.x_root, event.y_root)
         except Exception:
-            w = event.widget
-        # Buscar el ScrollableFrame más cercano que contenga el widget bajo el ratón
+            w = getattr(event, "widget", None)
+
+        if w is None:
+            w = getattr(event, "widget", None)
+
+        # 1. Buscar hacia arriba en la jerarquía del widget bajo el cursor
         cur = w
         target_sf = None
         while cur is not None:
@@ -66,11 +78,45 @@ class ScrollableFrame(tk.Frame):
                 target_sf = cur
                 break
             cur = getattr(cur, "master", None)
+
+        # 2. Respaldo por coordenadas en Linux/Wayland si winfo_containing no encontró el widget interno
+        if target_sf is None and hasattr(event, "x_root") and hasattr(event, "y_root"):
+            for sf in reversed(cls._active_instances):
+                try:
+                    if sf.winfo_exists() and sf.winfo_viewable():
+                        x1 = sf.winfo_rootx()
+                        y1 = sf.winfo_rooty()
+                        x2 = x1 + sf.winfo_width()
+                        y2 = y1 + sf.winfo_height()
+                        if x1 <= event.x_root <= x2 and y1 <= event.y_root <= y2:
+                            target_sf = sf
+                            break
+                except Exception:
+                    pass
+
         if target_sf is not None and target_sf.winfo_exists() and target_sf.canvas.winfo_exists():
-            try:
-                target_sf.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-            except Exception:
-                pass
+            delta_units = 0
+            num = getattr(event, "num", None)
+            if num == 4:
+                # Linux: Rueda hacia arriba
+                delta_units = -2
+            elif num == 5:
+                # Linux: Rueda hacia abajo
+                delta_units = 2
+            else:
+                # Windows y macOS (<MouseWheel>)
+                raw_delta = getattr(event, "delta", 0)
+                if raw_delta != 0:
+                    if abs(raw_delta) >= 120:
+                        delta_units = int(-1 * (raw_delta / 120) * 2)
+                    else:
+                        delta_units = -2 if raw_delta > 0 else 2
+
+            if delta_units != 0:
+                try:
+                    target_sf.canvas.yview_scroll(delta_units, "units")
+                except Exception:
+                    pass
 
     def _on_canvas_configure(self, event):
         if self.canvas.winfo_exists():

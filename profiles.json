@@ -71,6 +71,26 @@
           "wide": ""
         },
         "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {}
       }
     },
     "Osito Discord": {
@@ -110,6 +130,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -208,6 +248,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -351,6 +411,26 @@
           "wide": ""
         },
         "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {}
       }
     },
     "defy": {
@@ -423,6 +503,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -497,7 +597,129 @@
           "wide": ""
         },
         "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {}
       }
+    },
+    "Nara": {
+      "mic_device_name": "Micrófono (3- fifine Microphone",
+      "mic_threshold": 20,
+      "scream_threshold": 55,
+      "image_mode": "4_states",
+      "props": [],
+      "extra_expressions": [],
+      "a1_idle": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\idle.png",
+      "a1_idle_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\idle_blink.png",
+      "a1_talk": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk.png",
+      "a1_talk_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk_blink.png",
+      "a1_scream": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\scream.png",
+      "a1_idle_motion": "Ninguna",
+      "a1_idle_blink_motion": "Ninguna",
+      "a1_talk_motion": "Ninguna",
+      "a1_talk_blink_motion": "Ninguna",
+      "a1_scream_motion": "Ninguna",
+      "a1_ext_trans_mouth_inbetween_33732": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochi\\ext_trans_mouth_inbetween_33732.png",
+      "a1_ext_trans_mouth_inbetween_33732_motion": "Ninguna",
+      "flip_x": false,
+      "a1_idle_speed": 1.0,
+      "a1_idle_blink_speed": 1.0,
+      "a1_talk_speed": 1.0,
+      "a1_talk_blink_speed": 1.0,
+      "a1_ext_trans_mouth_inbetween_7062": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_mouth_inbetween_7062.png",
+      "a1_ext_trans_mouth_inbetween_7062_motion": "Respiración",
+      "a1_ext_trans_mouth_inbetween_7062_speed": 1.0,
+      "a1_ext_state_scream_30280": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_state_scream_30280.png",
+      "a1_ext_state_scream_30280_motion": "Flotar",
+      "a1_ext_state_scream_30280_speed": 1.0,
+      "a1_ext_trans_pre_talk_43755_speed": 1.0,
+      "a1_ext_trans_pre_scream_81532": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_pre_scream_81532.png",
+      "a1_ext_trans_pre_scream_81532_motion": "Balanceo",
+      "a1_ext_trans_pre_scream_81532_speed": 1.0,
+      "a1_ext_trans_blink_inbetween_38090": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_inbetween_38090.png",
+      "a1_ext_trans_blink_inbetween_38090_motion": "Elástico",
+      "a1_ext_trans_blink_inbetween_38090_speed": 1.0,
+      "a1_ext_trans_blink_talk_inbetween_96899": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_talk_inbetween_96899.png",
+      "a1_ext_trans_blink_talk_inbetween_96899_motion": "Respiración",
+      "a1_ext_trans_blink_talk_inbetween_96899_speed": 1.0,
+      "a1_ext_idle_fidget_22978": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_idle_fidget_22978.png",
+      "a1_ext_idle_fidget_22978_motion": "Saltitos",
+      "a1_ext_idle_fidget_22978_speed": 1.0,
+      "a1_ext_state_scream_alt_9000": "D:\\Progra\\hobie\\vtuber coop\\personajes\\gabo\\ext_state_scream_alt_9000.png",
+      "a1_ext_state_scream_alt_9000_motion": "Sacudida",
+      "a1_ext_state_scream_alt_9000_speed": 1.0,
+      "a1_ext_state_scream_82441": "D:\\Progra\\hobie\\vtuber coop\\personajes\\gabo\\ext_state_scream_82441.png",
+      "a1_ext_state_scream_82441_motion": "Sacudida",
+      "a1_ext_state_scream_82441_speed": 1.0,
+      "a1_ext_trans_mouth_inbetween_33732_speed": 1.0,
+      "independent_mouth": {
+        "enabled": true,
+        "offset_x": -1,
+        "offset_y": 4,
+        "scale": 127,
+        "rotation": 0,
+        "follows_bounce": true,
+        "squash_strength": 100,
+        "sprites": {
+          "closed": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\closed.png",
+          "half": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\half.png",
+          "open": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\open.png",
+          "wide": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\wide.png"
+        },
+        "sprites_rel": {
+          "closed": "mouths/closed.png",
+          "half": "mouths/half.png",
+          "open": "mouths/open.png",
+          "wide": "mouths/wide.png"
+        },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": true,
+        "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
+        "sprite_rel": "eyes/pupils.png",
+        "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
+        "mask_sprite_rel": "eyes/mask.png",
+        "show_mask": true,
+        "overlay_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\lashes.png",
+        "overlay_sprite_rel": "eyes/lashes.png",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 31,
+        "rotation": 0,
+        "mouse_radius": 18,
+        "smoothness": 42,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {
+          "idle_blink": {
+            "offset_x": 0,
+            "offset_y": 0,
+            "scale": 31,
+            "rotation": 0,
+            "hidden": true
+          }
+        }
+      },
+      "a1_scream_speed": 1.0
     }
   },
   "player2": {
@@ -538,6 +760,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -583,6 +825,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -655,6 +917,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -789,6 +1071,26 @@
           "wide": ""
         },
         "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {}
       }
     },
     "defy": {
@@ -832,6 +1134,26 @@
           "open": "",
           "wide": ""
         },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
         "frame_overrides": {}
       }
     },
@@ -877,7 +1199,100 @@
       "a2_idle_speed": 0.63,
       "a2_idle_blink_speed": 2.0,
       "a2_talk_speed": 0.71,
-      "a2_talk_blink_speed": 1.0
+      "a2_talk_blink_speed": 1.0,
+      "independent_eyes": {
+        "enabled": false,
+        "sprite": "",
+        "sprite_rel": "",
+        "mask_sprite": "",
+        "mask_sprite_rel": "",
+        "show_mask": false,
+        "overlay_sprite": "",
+        "overlay_sprite_rel": "",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 100,
+        "rotation": 0,
+        "mouse_radius": 12,
+        "smoothness": 35,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {}
+      }
+    },
+    "Nara": {
+      "discord_source_id": "app:discord",
+      "discord_threshold": 25,
+      "scream_threshold": 55,
+      "image_mode": "4_states",
+      "flip_x": false,
+      "a2_idle_motion": "Ninguna",
+      "a2_idle_speed": 1.0,
+      "a2_idle_blink_motion": "Ninguna",
+      "a2_idle_blink_speed": 1.0,
+      "a2_talk_motion": "Ninguna",
+      "a2_talk_speed": 1.0,
+      "a2_talk_blink_motion": "Ninguna",
+      "a2_talk_blink_speed": 1.0,
+      "a2_scream_motion": "Ninguna",
+      "a2_scream_speed": 1.0,
+      "a2_idle": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\idle.png",
+      "a2_idle_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\idle_blink.png",
+      "a2_talk": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk.png",
+      "a2_talk_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk_blink.png",
+      "a2_scream": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\scream.png",
+      "props": [],
+      "independent_mouth": {
+        "enabled": true,
+        "offset_x": -1,
+        "offset_y": 4,
+        "scale": 127,
+        "rotation": 0,
+        "follows_bounce": true,
+        "squash_strength": 100,
+        "sprites": {
+          "closed": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\closed.png",
+          "half": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\half.png",
+          "open": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\open.png",
+          "wide": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\wide.png"
+        },
+        "sprites_rel": {
+          "closed": "mouths/closed.png",
+          "half": "mouths/half.png",
+          "open": "mouths/open.png",
+          "wide": "mouths/wide.png"
+        },
+        "frame_overrides": {}
+      },
+      "independent_eyes": {
+        "enabled": true,
+        "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
+        "sprite_rel": "eyes/pupils.png",
+        "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
+        "mask_sprite_rel": "eyes/mask.png",
+        "show_mask": true,
+        "overlay_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\lashes.png",
+        "overlay_sprite_rel": "eyes/lashes.png",
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 31,
+        "rotation": 0,
+        "mouse_radius": 18,
+        "smoothness": 42,
+        "sensitivity": 300,
+        "follows_bounce": true,
+        "hide_on_blink": true,
+        "frame_overrides": {
+          "idle_blink": {
+            "offset_x": 0,
+            "offset_y": 0,
+            "scale": 31,
+            "rotation": 0,
+            "hidden": true
+          }
+        }
+      }
     }
   }
 }

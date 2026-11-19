@@ -1109,8 +1109,18 @@ class AvatarWindow(tk.Toplevel):
         return True
 
     def _get_avatar_center_and_scale(self, w, h, padding=20):
+        avail_w = max(10, w - padding * 2)
         avail_h = max(10, h - padding * 2)
-        pos_scale = avail_h / 384.0
+        raw_imgs = getattr(self, "raw_images", None) or {}
+        active_key = self._get_active_key() if hasattr(self, "_get_active_key") else "idle"
+        frames = raw_imgs.get(active_key) or raw_imgs.get("idle")
+        if frames:
+            raw_img = frames[self.anim_frame_idx % len(frames)][0]
+            rw, rh = max(1, raw_img.width), max(1, raw_img.height)
+            fit_ratio = min(avail_w / rw, avail_h / rh)
+            pos_scale = fit_ratio * max(rw, rh) / 384.0
+        else:
+            pos_scale = min(avail_w, avail_h) / 384.0
         base_x = w // 2
         base_y = h - padding
         av_h = getattr(self, "_last_avatar_h", 0) or (avail_h // 2)

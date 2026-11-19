@@ -1,0 +1,81 @@
+{
+  "name": "Nara",
+  "image_mode": "4_states",
+  "flip_x": false,
+  "mic_threshold": 20,
+  "discord_threshold": 25,
+  "scream_threshold": 55,
+  "props": [],
+  "extra_expressions": [],
+  "independent_mouth": {
+    "enabled": true,
+    "offset_x": -1,
+    "offset_y": 4,
+    "scale": 127,
+    "rotation": 0,
+    "follows_bounce": true,
+    "squash_strength": 100,
+    "sprites": {
+      "closed": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\closed.png",
+      "half": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\half.png",
+      "open": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\open.png",
+      "wide": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\wide.png"
+    },
+    "sprites_rel": {
+      "closed": "mouths/closed.png",
+      "half": "mouths/half.png",
+      "open": "mouths/open.png",
+      "wide": "mouths/wide.png"
+    },
+    "frame_overrides": {}
+  },
+  "independent_eyes": {
+    "enabled": true,
+    "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
+    "sprite_rel": "eyes/pupils.png",
+    "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
+    "mask_sprite_rel": "eyes/mask.png",
+    "show_mask": true,
+    "overlay_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\lashes.png",
+    "overlay_sprite_rel": "eyes/lashes.png",
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 31,
+    "rotation": 0,
+    "mouse_radius": 18,
+    "smoothness": 42,
+    "sensitivity": 300,
+    "follows_bounce": true,
+    "hide_on_blink": true,
+    "frame_overrides": {
+      "idle_blink": {
+        "offset_x": 0,
+        "offset_y": 0,
+        "scale": 31,
+        "rotation": 0,
+        "hidden": true
+      }
+    }
+  },
+  "motions": {
+    "idle": "Ninguna",
+    "idle_blink": "Ninguna",
+    "talk": "Ninguna",
+    "talk_blink": "Ninguna",
+    "scream": "Ninguna"
+  },
+  "motion_speeds": {
+    "idle": 1.0,
+    "idle_blink": 1.0,
+    "talk": 1.0,
+    "talk_blink": 1.0,
+    "scream": 1.0
+  },
+  "expressions": {
+    "idle": "idle.png",
+    "idle_blink": "idle_blink.png",
+    "talk": "talk.png",
+    "talk_blink": "talk_blink.png",
+    "scream": "scream.png"
+  }
+}

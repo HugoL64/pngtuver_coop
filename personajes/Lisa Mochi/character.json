@@ -56,6 +56,26 @@
     },
     "frame_overrides": {}
   },
+  "independent_eyes": {
+    "enabled": false,
+    "sprite": "",
+    "sprite_rel": "",
+    "mask_sprite": "",
+    "mask_sprite_rel": "",
+    "show_mask": false,
+    "overlay_sprite": "",
+    "overlay_sprite_rel": "",
+    "offset_x": 0,
+    "offset_y": 0,
+    "scale": 100,
+    "rotation": 0,
+    "mouse_radius": 12,
+    "smoothness": 35,
+    "sensitivity": 300,
+    "follows_bounce": true,
+    "hide_on_blink": true,
+    "frame_overrides": {}
+  },
   "motions": {
     "idle": "Ninguna",
     "idle_blink": "Respiración",

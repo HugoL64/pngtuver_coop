@@ -1077,13 +1077,24 @@ class LiveAvatarPreview(tk.Frame):
             return role in vf
         return True
 
+    def _get_pos_scale(self, w, h, role=None):
+        avail_w = max(20, w - 16)
+        avail_h = max(20, h - 16)
+        frames = (self.raw_images.get(role) if role else None) or self.raw_images.get("idle")
+        if frames:
+            raw_img = frames[self.anim_frame_idx % len(frames)][0]
+            rw, rh = max(1, raw_img.width), max(1, raw_img.height)
+            fit_ratio = min(avail_w / rw, avail_h / rh)
+            return fit_ratio * max(rw, rh) / 384.0
+        return min(avail_w, avail_h) / 384.0
+
     def _update_position_only(self):
         w = max(self.size[0], self.canvas.winfo_width())
         h = max(self.size[1], self.canvas.winfo_height())
         base_x = (w // 2)
         base_y = (h // 2)
-        pos_scale = max(20, h - 16) / 384.0
         role = self._get_current_role()
+        pos_scale = self._get_pos_scale(w, h, role)
 
         if self.image_item is not None:
             x = base_x + self.jitter_x
@@ -1146,7 +1157,6 @@ class LiveAvatarPreview(tk.Frame):
         h = max(self.size[1], self.canvas.winfo_height())
         base_x = (w // 2)
         base_y = (h // 2)
-        pos_scale = max(20, h - 16) / 384.0
 
         # Limpiar items de accesorios eliminados
         valid_pids = {p["id"] for p in self.photo_props}
@@ -1165,6 +1175,7 @@ class LiveAvatarPreview(tk.Frame):
 
         self.canvas.itemconfig(self.placeholder_item, state="hidden")
         role = self._get_current_role()
+        pos_scale = self._get_pos_scale(w, h, role)
 
         # 1. DIBUJAR ACCESORIOS DE FONDO (BACK)
         back_items = []
@@ -1346,8 +1357,8 @@ class LiveAvatarPreview(tk.Frame):
         h = max(self.size[1], self.canvas.winfo_height())
         base_x = (w // 2)
         base_y = (h // 2)
-        pos_scale = max(20, h - 16) / 384.0
         role = self._get_current_role()
+        pos_scale = self._get_pos_scale(w, h, role)
         self._update_eyes_position_only(base_x, base_y, pos_scale, role)
 
     def _update_eyes_position_only(self, base_x, base_y, pos_scale, role):

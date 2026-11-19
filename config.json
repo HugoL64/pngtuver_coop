@@ -1,6 +1,6 @@
 {
   "game_mode": "single",
-  "current_p1_profile": "Lisa Mochy",
+  "current_p1_profile": "Nara",
   "current_p2_profile": "Lisa Mochy",
   "bg_color": "#0000FF",
   "bounce_enabled": true,
@@ -73,6 +73,10 @@
     {
       "type": "char",
       "name": "defy 2"
+    },
+    {
+      "type": "char",
+      "name": "Nara"
     }
   ],
   "mic_device_name": "Micrófono (3- fifine Microphone",

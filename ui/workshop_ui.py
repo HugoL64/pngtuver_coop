@@ -2635,7 +2635,7 @@ class WorkshopMixin:
                 img = Image.open(path).convert("RGBA")
                 if flip_x:
                     img = img.transpose(Image.FLIP_LEFT_RIGHT)
-                max_dim = prev_size - 24
+                max_dim = prev_size - 16
                 ratio = min(max_dim / max(1, img.width), max_dim / max(1, img.height))
                 nw = max(1, int(img.width * ratio))
                 nh = max(1, int(img.height * ratio))

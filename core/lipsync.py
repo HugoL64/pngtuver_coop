@@ -223,11 +223,13 @@ class MouthRenderCache:
 
     def __init__(self):
         self.pil_frames = {}   # { slot: [(PIL.Image, dur), ...] }
+        self.norm_scales = {}  # { slot: [orig_w / thumb_w, ...] }
         self.photo_cache = {}  # { (slot, ov_key, frame_idx, squash_idx): ImageTk.PhotoImage }
         self._last_sig = None
 
     def clear(self):
         self.pil_frames.clear()
+        self.norm_scales.clear()
         self.photo_cache.clear()
         self._last_sig = None
 
@@ -241,6 +243,7 @@ class MouthRenderCache:
             if not path or not os.path.exists(path):
                 continue
             frames = []
+            scales = []
             try:
                 with Image.open(path) as img:
                     n_frames = min(getattr(img, "n_frames", 1), 30)
@@ -248,16 +251,20 @@ class MouthRenderCache:
                         if n_frames > 1:
                             img.seek(i)
                         fr = img.convert("RGBA").copy()
+                        orig_w = max(1, fr.width)
                         if max_dim and max(fr.size) > max_dim:
                             fr.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                        norm_sc = orig_w / max(1, fr.width)
                         if flip_x:
                             fr = fr.transpose(Image.FLIP_LEFT_RIGHT)
                         dur = max(0.02, float(img.info.get("duration", 100)) / 1000.0)
                         frames.append((fr, dur))
+                        scales.append(norm_sc)
             except Exception:
                 pass
             if frames:
                 self.pil_frames[slot] = frames
+                self.norm_scales[slot] = scales
 
     def get_photo(self, slot, ov_key, frame_idx, squash_idx, base_scale, scale_pct, rotation_deg, max_cache=64):
         frames = self.pil_frames.get(slot)
@@ -270,7 +277,9 @@ class MouthRenderCache:
             return cached
 
         pil_img = frames[f_idx][0]
-        sc_factor = max(0.05, float(base_scale) * (float(scale_pct) / 100.0))
+        scales = self.norm_scales.get(slot)
+        norm_sc = scales[f_idx] if scales and f_idx < len(scales) else 1.0
+        sc_factor = max(0.05, float(base_scale) * (float(scale_pct) / 100.0)) * norm_sc
         nw = max(1, int(pil_img.width * sc_factor))
         nh = max(1, int(pil_img.height * sc_factor))
 

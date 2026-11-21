@@ -7,6 +7,8 @@ import shutil
 import time
 
 from core.app_constants import CHARACTERS_DIR, log_debug, ScrollableFrame
+from core.character_pack import import_character_zip
+from core.emotions import default_emotion_slots
 from ui.live_avatar_preview import LiveAvatarPreview
 from core.hotkeys import MODIFIER_VKS, current_modifiers, format_hotkey, pretty_key_label
 
@@ -200,6 +202,19 @@ class LobbyMixin:
         )
         self.p1_name_lbl.pack(fill=tk.BOTH, expand=True)
 
+        p1_em_bar = tk.Frame(self.p1_active_body, bg="#FFFFFF")
+        p1_em_bar.pack(fill=tk.X, pady=(2, 4))
+        tk.Label(p1_em_bar, text="Emoción:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
+        self.p1_quick_em_btns = []
+        for em_i in range(5):
+            eb = tk.Button(
+                p1_em_bar, text=str(em_i + 1), font=("Segoe UI", 7, "bold"),
+                bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+                command=lambda idx=em_i: self._select_lobby_emotion_slot(1, idx)
+            )
+            eb.pack(side=tk.LEFT, padx=2)
+            self.p1_quick_em_btns.append(eb)
+
         # Vúmetro INTERACTIVO en el Lobby (Clic / Arrastrar para umbrales de Voz y Grito + Auto-Calibración)
         meter_f1 = tk.Frame(self.p1_active_body, bg="#FFFFFF")
         meter_f1.pack(fill=tk.X, pady=(2, 4))
@@ -378,6 +393,19 @@ class LobbyMixin:
         )
         self.p2_name_lbl.pack(fill=tk.BOTH, expand=True)
 
+        p2_em_bar = tk.Frame(self.p2_active_body, bg="#FFFFFF")
+        p2_em_bar.pack(fill=tk.X, pady=(2, 4))
+        tk.Label(p2_em_bar, text="Emoción:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
+        self.p2_quick_em_btns = []
+        for em_i in range(5):
+            eb = tk.Button(
+                p2_em_bar, text=str(em_i + 1), font=("Segoe UI", 7, "bold"),
+                bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+                command=lambda idx=em_i: self._select_lobby_emotion_slot(2, idx)
+            )
+            eb.pack(side=tk.LEFT, padx=2)
+            self.p2_quick_em_btns.append(eb)
+
         # Vúmetro INTERACTIVO de Discord + Auto-Calibración
         meter_f2 = tk.Frame(self.p2_active_body, bg="#FFFFFF")
         meter_f2.pack(fill=tk.X, pady=(2, 4))
@@ -514,6 +542,13 @@ class LobbyMixin:
             relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
             command=create_cmd
         ).pack(side=tk.LEFT)
+
+        tk.Button(
+            footer_bar, text="📥 Importar (.zip)", font=("Segoe UI", 8, "bold"),
+            bg="#E0F2FE", fg="#0369A1", activebackground="#BAE6FD",
+            relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
+            command=lambda p=player_num: self._import_character_zip_dialog(p)
+        ).pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(
             footer_bar,
@@ -1506,6 +1541,93 @@ class LobbyMixin:
         log_debug(f"[CONFIG] Opciones experimentales: {'Activadas' if exp else 'Desactivadas'}")
         self.save_global_config()
 
+    def _on_dim_silence_toggle(self):
+        val = bool(self.dim_silence_var.get())
+        self.global_config["dim_on_silence"] = val
+        for win in (getattr(self, "avatar1_window", None), getattr(self, "avatar2_window", None)):
+            if win and win.winfo_exists():
+                win.dim_on_silence = val
+                win._update_display()
+        self.save_global_config()
+
+    def _on_auto_open_obs_toggle(self):
+        val = bool(self.auto_open_obs_var.get())
+        self.global_config["auto_open_obs"] = val
+        self.save_global_config()
+
+    def _refresh_lobby_emotion_bars(self, player_num=None):
+        targets = (1, 2) if player_num is None else (int(player_num),)
+        for pnum in targets:
+            btns = getattr(self, "p1_quick_em_btns" if pnum == 1 else "p2_quick_em_btns", None)
+            if not btns:
+                continue
+            td = self.p1_data if pnum == 1 else self.p2_data
+            try:
+                active_idx = max(0, min(4, int(td.get("active_emotion", 0) or 0)))
+            except Exception:
+                active_idx = 0
+            slots = td.get("emotion_slots")
+            if not isinstance(slots, list) or len(slots) < 5:
+                slots = default_emotion_slots()
+            for idx, btn in enumerate(btns):
+                sl = slots[idx] if idx < len(slots) else {}
+                lbl = str(sl.get("name") or str(idx + 1)).strip() or str(idx + 1)
+                if len(lbl) > 8:
+                    lbl = lbl[:7] + "…"
+                is_sel = (idx == active_idx)
+                btn.config(
+                    text=lbl,
+                    bg="#2563EB" if is_sel else "#F1F5F9",
+                    fg="#FFFFFF" if is_sel else "#334155",
+                    activebackground="#1D4ED8" if is_sel else "#CBD5E1",
+                    activeforeground="#FFFFFF" if is_sel else "#0F172A",
+                )
+
+    def _select_lobby_emotion_slot(self, player_num, idx):
+        idx = max(0, min(4, int(idx)))
+        is_p1 = (int(player_num) == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        for p_key, rt_d in (
+            ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+            ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+        ):
+            prof = self.profiles.get(p_key, {}).get(curr_name)
+            for d in (prof, rt_d):
+                if isinstance(d, dict):
+                    d["active_emotion"] = idx
+        self._save_character_folder_meta(curr_name)
+        self.save_profiles_to_disk()
+        self._refresh_lobby_emotion_bars()
+        self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
+        self.p2_live_avatar.set_character(self.p2_data, prefix="a2")
+        if self.current_screen == "workshop" and hasattr(self, "_refresh_workshop_ui"):
+            self._refresh_workshop_ui()
+        self._sync_windows_images()
+
+    def _import_character_zip_dialog(self, player_num):
+        zp = filedialog.askopenfilename(
+            parent=self.root,
+            title="Importar personaje (.zip)",
+            filetypes=[("Pack PNGTuber (.zip)", "*.zip"), ("Todos", "*.*")]
+        )
+        if not zp:
+            return
+        try:
+            char_name, _folder = import_character_zip(zp, CHARACTERS_DIR)
+            self._scan_disk_character_folders()
+            if char_name in self.profiles.get("player1", {}) and char_name in self.profiles.get("player2", {}):
+                self._ensure_character_folder_assets(
+                    char_name,
+                    self.profiles["player1"][char_name],
+                    self.profiles["player2"][char_name],
+                )
+            self._sync_character_layout()
+            self.save_profiles_to_disk()
+            self._choose_character_from_card_list(player_num, char_name)
+            messagebox.showinfo("Personaje importado", f"'{char_name}' se importó correctamente.", parent=self.root)
+        except Exception as e:
+            messagebox.showerror("Error al importar", f"No se pudo importar el archivo:\n{e}", parent=self.root)
+
     def _refresh_eco_mode(self):
         try:
             a1_open = bool(self.avatar1_window and self.avatar1_window.winfo_exists())
@@ -1552,6 +1674,26 @@ class LobbyMixin:
         if hasattr(self, "hotkey_listener"):
             self.hotkey_listener.set_bindings(bindings)
 
+    def _get_emotion_slot_choices(self, pnum, char_name, include_actual=True):
+        prof_key = "player1" if int(pnum) == 1 else "player2"
+        prof = self.profiles.get(prof_key, {}).get(char_name, {})
+        slots = prof.get("emotion_slots") or []
+        out = ["Actual"] if include_actual else []
+        for i in range(5):
+            nm = str(slots[i].get("name", "")).strip() if (i < len(slots) and isinstance(slots[i], dict)) else str(i + 1)
+            out.append(f"{i + 1}: {nm}" if nm and nm != str(i + 1) else str(i + 1))
+        return out
+
+    @staticmethod
+    def _parse_emotion_slot_choice(val):
+        s = str(val or "").strip()
+        if not s or s.lower() == "actual":
+            return None
+        try:
+            return max(0, min(4, int(s.split(":", 1)[0].strip()) - 1))
+        except Exception:
+            return None
+
     def _on_hotkey_triggered(self, binding_id):
         try:
             p_str, idx_str = binding_id.split(":", 1)
@@ -1568,25 +1710,37 @@ class LobbyMixin:
         if not target or target not in self.profiles.get(prof_key, {}):
             return
 
+        target_em = self._parse_emotion_slot_choice(slot.get("emotion_slot", "Actual"))
         curr_key = "current_p1_profile" if pnum == 1 else "current_p2_profile"
         curr = self.global_config.get(curr_key, "")
+        rt_data = self.p1_data if pnum == 1 else self.p2_data
+        curr_em = int(rt_data.get("active_emotion", 0) or 0)
         mode = slot.get("mode", "toggle")
 
         if mode == "toggle":
             base = self._hotkey_base.get(pnum)
-            if curr == target and base and base in self.profiles.get(prof_key, {}) and base != target:
-                next_char = base
+            same_state = (curr == target) and (target_em is None or curr_em == target_em)
+            if same_state and isinstance(base, tuple) and base[0] in self.profiles.get(prof_key, {}):
+                next_char, next_em = base
                 self._hotkey_base[pnum] = None
             else:
-                if curr != target:
-                    self._hotkey_base[pnum] = curr
-                next_char = target
+                if not same_state:
+                    self._hotkey_base[pnum] = (curr, curr_em)
+                next_char, next_em = target, target_em
         else:
             self._hotkey_base[pnum] = None
-            next_char = target
+            next_char, next_em = target, target_em
 
-        log_debug(f"[ATAJO] ⌨️ {pnum}P -> '{next_char}'")
+        log_debug(f"[ATAJO] ⌨️ {pnum}P -> '{next_char}' (slot={next_em})")
+        if next_em is not None:
+            self.profiles[prof_key][next_char]["active_emotion"] = int(next_em)
         self._choose_character_from_card_list(pnum, next_char)
+        if next_em is not None:
+            rt_data["active_emotion"] = int(next_em)
+            prev_w = self.p1_live_avatar if pnum == 1 else self.p2_live_avatar
+            if prev_w and prev_w.winfo_exists():
+                prev_w.set_character(rt_data, prefix="a1" if pnum == 1 else "a2")
+            self._sync_windows_images()
 
     def _open_hotkeys_dialog(self):
         dlg = tk.Toplevel(self.root)
@@ -1756,6 +1910,21 @@ class LobbyMixin:
 
                     bot_r = tk.Frame(scard, bg="#FFFFFF")
                     bot_r.pack(fill=tk.X, pady=(6, 0))
+
+                    mid_r = tk.Frame(scard, bg="#FFFFFF")
+                    mid_r.pack(fill=tk.X, pady=(5, 0), before=bot_r)
+                    tk.Label(mid_r, text="Slot:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 6))
+                    em_choices = self._get_emotion_slot_choices(pnum, ch_name, include_actual=True)
+                    em_var = tk.StringVar(value=str(slot.get("emotion_slot", "Actual") or "Actual"))
+                    em_cmb = ttk.Combobox(mid_r, textvariable=em_var, values=em_choices, state="readonly", width=20, font=("Segoe UI", 8))
+                    em_cmb.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+                    def make_em_cb(s_ref, v_ref):
+                        def on_em(_e=None):
+                            s_ref["emotion_slot"] = v_ref.get()
+                            self.save_global_config()
+                        return on_em
+                    em_cmb.bind("<<ComboboxSelected>>", make_em_cb(slot, em_var))
 
                     key_txt = slot.get("label") or "Sin tecla"
                     is_cap = (capturing["slot"] is slot)
@@ -2037,6 +2206,26 @@ class LobbyMixin:
 
         if not hasattr(self, "experimental_var"):
             self.experimental_var = tk.BooleanVar(value=self.global_config.get("experimental_enabled", False))
+        if not hasattr(self, "dim_silence_var"):
+            self.dim_silence_var = tk.BooleanVar(value=self.global_config.get("dim_on_silence", False))
+        build_option_card(
+            "🌙",
+            "Atenuar avatar en silencio",
+            "Oscurece ligeramente el avatar en OBS cuando no está hablando, ideal para collabs de 2 jugadores.",
+            self.dim_silence_var,
+            self._on_dim_silence_toggle,
+            accent="#475569"
+        )
+        if not hasattr(self, "auto_open_obs_var"):
+            self.auto_open_obs_var = tk.BooleanVar(value=self.global_config.get("auto_open_obs", False))
+        build_option_card(
+            "🚀",
+            "Abrir ventanas OBS al iniciar",
+            "Abre automáticamente las ventanas de avatar para OBS apenas arranca el programa.",
+            self.auto_open_obs_var,
+            self._on_auto_open_obs_toggle,
+            accent="#0284C7"
+        )
         build_option_card(
             "🧪",
             "Opciones experimentales",

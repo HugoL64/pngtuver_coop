@@ -10,6 +10,7 @@ import time
 from core.app_constants import EXTRA_EXPRESSION_CATALOG, log_debug, ScrollableFrame
 from ui.live_avatar_preview import LiveAvatarPreview
 from core.hotkeys import format_hotkey, pretty_key_label
+from core.character_pack import export_character_zip
 from core.emotions import (
     BASE_POSE_ROLES,
     default_emotion_slots,
@@ -172,6 +173,13 @@ class WorkshopMixin:
             char_h, text="🎞️ FOTOGRAMAS Y ANIMACIONES DEL PERSONAJE",
             font=("Segoe UI", 10, "bold"), bg="#FFFFFF", fg="#1E293B"
         ).pack(side=tk.LEFT)
+
+        tk.Button(
+            char_h, text="📦 Exportar .zip", font=("Segoe UI", 8, "bold"),
+            bg="#E0F2FE", fg="#0369A1", activebackground="#0284C7", activeforeground="#FFFFFF",
+            relief="solid", bd=1, padx=8, pady=1, cursor="hand2",
+            command=self._export_current_workshop_character
+        ).pack(side=tk.RIGHT)
 
 
         self.w_folder_path_lbl = tk.Label(
@@ -4220,3 +4228,69 @@ class WorkshopMixin:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def _export_current_workshop_character(self):
+        is_p1 = (self.workshop_player == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        self._save_character_folder_meta(curr_name)
+        folder_path = self._get_character_folder(curr_name)
+
+        slots = target_dict.get("emotion_slots") or []
+        choices = [("all", "📦 Todos los perfiles de emoción (1–5)")]
+        for i in range(5):
+            nm = str(slots[i].get("name", "")).strip() if (i < len(slots) and isinstance(slots[i], dict)) else str(i + 1)
+            lbl = f"Perfil {i + 1}: {nm}" if nm and nm != str(i + 1) else f"Perfil {i + 1}"
+            choices.append((i, lbl))
+
+        pick_dlg = tk.Toplevel(self.root)
+        pick_dlg.title(f"📦 Exportar '{curr_name}'")
+        pick_dlg.geometry("360x290")
+        pick_dlg.resizable(False, False)
+        pick_dlg.configure(bg="#FFFFFF")
+        pick_dlg.transient(self.root)
+        pick_dlg.grab_set()
+
+        tk.Label(
+            pick_dlg, text=f"¿Qué deseas exportar de '{curr_name}'?",
+            font=("Segoe UI", 10, "bold"), bg="#FFFFFF", fg="#0F172A", pady=10
+        ).pack(fill=tk.X, padx=14)
+
+        sel_var = tk.StringVar(value="all")
+        for val_k, txt_lbl in choices:
+            tk.Radiobutton(
+                pick_dlg, text=txt_lbl, variable=sel_var, value=str(val_k),
+                font=("Segoe UI", 9), bg="#FFFFFF", fg="#1E293B", selectcolor="#FFFFFF",
+                anchor="w", cursor="hand2"
+            ).pack(fill=tk.X, padx=22, pady=2)
+
+        def do_export():
+            raw_v = sel_var.get()
+            slot_arg = None if raw_v == "all" else int(raw_v)
+            pick_dlg.destroy()
+            default_fn = f"{curr_name}.zip" if slot_arg is None else f"{curr_name}_slot{slot_arg + 1}.zip"
+            out_path = filedialog.asksaveasfilename(
+                parent=self.root,
+                title="Guardar pack de personaje (.zip)",
+                initialfile=default_fn,
+                defaultextension=".zip",
+                filetypes=[("Pack PNGTuber (.zip)", "*.zip")]
+            )
+            if not out_path:
+                return
+            try:
+                export_character_zip(folder_path, curr_name, out_path, slot_idx=slot_arg)
+                messagebox.showinfo("Exportado", f"Personaje exportado correctamente en:\n{out_path}", parent=self.root)
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo exportar el personaje:\n{e}", parent=self.root)
+
+        btn_f = tk.Frame(pick_dlg, bg="#FFFFFF", pady=12)
+        btn_f.pack(fill=tk.X, side=tk.BOTTOM)
+        tk.Button(
+            btn_f, text="Cancelar", font=("Segoe UI", 9), bg="#E2E8F0", fg="#334155",
+            relief="solid", bd=1, padx=12, pady=4, cursor="hand2", command=pick_dlg.destroy
+        ).pack(side=tk.RIGHT, padx=(6, 14))
+        tk.Button(
+            btn_f, text="📦 Exportar .zip", font=("Segoe UI", 9, "bold"), bg="#16A34A", fg="#FFFFFF",
+            relief="solid", bd=1, padx=14, pady=4, cursor="hand2", command=do_export
+        ).pack(side=tk.RIGHT)

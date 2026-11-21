@@ -1,5 +1,5 @@
 import tkinter as tk
-from PIL import Image, ImageTk
+from PIL import Image, ImageEnhance, ImageTk
 import os
 import random
 import time
@@ -22,7 +22,7 @@ from core.eyes import (
 )
 
 class AvatarWindow(tk.Toplevel):
-    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False, independent_mouth=None, independent_eyes=None, perf_mode="performance"):
+    def __init__(self, master, title, image_dict, mode_4_states=False, bg_color="#00FF00", bounce_enabled=True, on_hotkey=None, props_list=None, motions_map=None, motion_speeds_map=None, extra_expressions=None, flip_x=False, independent_mouth=None, independent_eyes=None, perf_mode="performance", dim_on_silence=False):
         super().__init__(master)
 
         self.title(title)
@@ -94,6 +94,7 @@ class AvatarWindow(tk.Toplevel):
         self._eye_oy = 0.0
         self._load_gen = 0
         self.perf_mode = perf_mode or "performance"
+        self.dim_on_silence = bool(dim_on_silence)
 
         # Raw PIL frames y cache de PhotoImage pre-escaladas por estado (soporta PNG estático, APNG, GIF y WEBP animado)
         # Formato: { key: [(pil_rgba_image, duration_sec), ...] }
@@ -899,15 +900,19 @@ class AvatarWindow(tk.Toplevel):
 
         self.after(16, self._animate_loop)
 
+    def _is_dimmed(self):
+        return bool(getattr(self, "dim_on_silence", False) and not self.is_talking and not self.is_screaming)
+
     def _get_squash_photo(self, active_key, frame_idx):
         frames_list = self.photo_cache.get(active_key) if active_key else None
         if not frames_list:
             return None
         idx = frame_idx % len(frames_list)
-        if self.squash_state == 0:
+        dimmed = self._is_dimmed()
+        if self.squash_state == 0 and not dimmed:
             return frames_list[idx][0]
 
-        cache_key = (active_key, idx, self.squash_state)
+        cache_key = (active_key, idx, self.squash_state, dimmed)
         cached = self.squash_photo_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -918,20 +923,24 @@ class AvatarWindow(tk.Toplevel):
 
         base_img = pil_list[idx % len(pil_list)]
         bw, bh = base_img.size
-        scale_map = {
-            -2: (1.07, 0.93),
-            -1: (1.04, 0.96),
-            1: (0.96, 1.04),
-            2: (0.93, 1.07),
-        }
-        sx, sy = scale_map.get(self.squash_state, (1.0, 1.0))
-        nw = max(1, int(round(bw * sx)))
-        nh = max(1, int(round(bh * sy)))
-        deformed = base_img.resize((nw, nh), Image.Resampling.BILINEAR)
+        if self.squash_state != 0:
+            scale_map = {
+                -2: (1.07, 0.93),
+                -1: (1.04, 0.96),
+                1: (0.96, 1.04),
+                2: (0.93, 1.07),
+            }
+            sx, sy = scale_map.get(self.squash_state, (1.0, 1.0))
+            nw = max(1, int(round(bw * sx)))
+            nh = max(1, int(round(bh * sy)))
+            deformed = base_img.resize((nw, nh), Image.Resampling.BILINEAR)
+        else:
+            deformed = base_img
+        if dimmed:
+            deformed = ImageEnhance.Brightness(deformed).enhance(0.55)
         res = ImageTk.PhotoImage(deformed)
         if len(self.squash_photo_cache) >= get_performance_preset(getattr(self, "perf_mode", "performance"))["squash_cache_max"]:
             self.squash_photo_cache.clear()
-        self.squash_pil_cache.clear()
         self.squash_photo_cache[cache_key] = res
         return res
 
@@ -1675,6 +1684,9 @@ class AvatarWindow(tk.Toplevel):
         for p in self.photo_props:
             if p.get("layer") != "back":
                 draw_prop_pil(p)
+
+        if self._is_dimmed():
+            comp = ImageEnhance.Brightness(comp).enhance(0.55)
 
         self._layered.push_pil_rgba(comp, self.winfo_x(), self.winfo_y())
 

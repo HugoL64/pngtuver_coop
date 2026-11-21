@@ -163,7 +163,14 @@ class ObsAndAlertsMixin:
         if action == "character":
             target_char = rule.get("character", "")
             if target_char and target_char in self.profiles.get(prof_key, {}):
+                em_idx = self._parse_emotion_slot_choice(rule.get("emotion_slot", "Actual"))
+                if em_idx is not None:
+                    rt_d = self.p1_data if pnum == 1 else self.p2_data
+                    restore_info["emotion_prev"] = int(rt_d.get("active_emotion", 0) or 0)
+                    self.profiles[prof_key][target_char]["active_emotion"] = em_idx
                 self._choose_character_from_card_list(pnum, target_char)
+                if em_idx is not None:
+                    self._set_player_forced_emotion_slot(pnum, em_idx + 1)
         elif action == "random_character":
             names = list(self.profiles.get(prof_key, {}).keys())
             curr_name = self.global_config.get(curr_key, "")
@@ -417,9 +424,10 @@ class ObsAndAlertsMixin:
                 r_player = tk.StringVar(value="Ambos" if str(rule.get("player")) == "both" else ("2P" if str(rule.get("player")) == "2" else "1P"))
                 r_action = tk.StringVar(value=ACTION_LABELS.get(rule.get("action", "character"), "Cambiar personaje"))
                 r_char = tk.StringVar(value=str(rule.get("character", "")))
+                r_slot = tk.StringVar(value=str(rule.get("emotion_slot", "Actual") or "Actual"))
                 r_dur = tk.StringVar(value=str(rule.get("duration", 8.0)))
 
-                def save_rule(r=rule, ev_v=r_enabled, e_v=r_event, p_v=r_player, a_v=r_action, c_v=r_char, d_v=r_dur):
+                def save_rule(r=rule, ev_v=r_enabled, e_v=r_event, p_v=r_player, a_v=r_action, c_v=r_char, s_v=r_slot, d_v=r_dur):
                     r["enabled"] = bool(ev_v.get())
                     ev_txt = e_v.get().strip()
                     if not ev_txt or ev_txt == EVENT_PLACEHOLDER:
@@ -430,6 +438,7 @@ class ObsAndAlertsMixin:
                     r["player"] = "both" if pv == "Ambos" else (2 if pv == "2P" else 1)
                     r["action"] = LABEL_TO_ACTION.get(a_v.get(), "character")
                     r["character"] = c_v.get()
+                    r["emotion_slot"] = s_v.get() or "Actual"
                     try:
                         r["duration"] = max(0.0, float(d_v.get().strip()))
                     except Exception:
@@ -509,9 +518,14 @@ class ObsAndAlertsMixin:
                 lbl_ch = tk.Label(row2, text="Personaje al que cambia:", font=("Segoe UI", 8), bg=card["bg"])
                 lbl_ch.pack(side=tk.LEFT, padx=(28, 6))
                 p_val = "2" if r_player.get() == "2P" else "1"
-                ch_cb = ttk.Combobox(row2, textvariable=r_char, values=get_char_names(p_val), width=24, state="readonly", font=("Segoe UI", 8))
-                ch_cb.pack(side=tk.LEFT, padx=(0, 14))
-                ch_cb.bind("<<ComboboxSelected>>", lambda _e, fn=save_rule: fn())
+                ch_cb = ttk.Combobox(row2, textvariable=r_char, values=get_char_names(p_val), width=18, state="readonly", font=("Segoe UI", 8))
+                ch_cb.pack(side=tk.LEFT, padx=(0, 8))
+
+                lbl_slot = tk.Label(row2, text="Slot:", font=("Segoe UI", 8), bg=card["bg"])
+                lbl_slot.pack(side=tk.LEFT, padx=(0, 4))
+                slot_cb = ttk.Combobox(row2, textvariable=r_slot, values=self._get_emotion_slot_choices(p_val, r_char.get(), include_actual=True), width=12, state="readonly", font=("Segoe UI", 8))
+                slot_cb.pack(side=tk.LEFT, padx=(0, 12))
+                slot_cb.bind("<<ComboboxSelected>>", lambda _e, fn=save_rule: fn())
 
                 lbl_dur = tk.Label(row2, text="Duración:", font=("Segoe UI", 8), bg=card["bg"])
                 lbl_dur.pack(side=tk.LEFT, padx=(0, 6))
@@ -594,27 +608,40 @@ class ObsAndAlertsMixin:
                 state_badge.config(command=on_badge_click)
                 apply_card_visual_state(is_active)
 
-                def on_pl_or_ac(_e=None, fn=save_rule, p_v=r_player, a_v=r_action, c_box=ch_cb, l_ch=lbl_ch):
+                def on_pl_or_ac(_e=None, fn=save_rule, p_v=r_player, a_v=r_action, c_box=ch_cb, s_box=slot_cb, l_ch=lbl_ch, l_sl=lbl_slot, c_v=r_char, s_v=r_slot):
                     if _e is not None:
                         fn()
                     pv = "2" if p_v.get() == "2P" else "1"
                     act_lbl = a_v.get()
                     if act_lbl == "Cambiar personaje":
-                        l_ch.config(text="Personaje al que cambia:")
+                        l_ch.config(text="Personaje:")
                         c_box["values"] = get_char_names(pv)
                         c_box.config(state="readonly")
+                        s_vals = self._get_emotion_slot_choices(pv, c_v.get(), include_actual=True)
+                        s_box["values"] = s_vals
+                        if s_v.get() not in s_vals:
+                            s_v.set("Actual")
+                        l_sl.pack(side=tk.LEFT, padx=(0, 4), before=lbl_dur)
+                        s_box.pack(side=tk.LEFT, padx=(0, 12), before=lbl_dur)
                     elif act_lbl == "Activar accesorio (Prop)":
                         l_ch.config(text="Accesorio (Prop):")
                         c_box["values"] = get_prop_names(pv)
                         c_box.config(state="readonly")
+                        l_sl.pack_forget()
+                        s_box.pack_forget()
                     elif act_lbl == "Cambiar perfil de emoción":
                         l_ch.config(text="Perfil de emoción:")
                         c_box["values"] = get_emotion_slot_labels(pv)
                         c_box.config(state="readonly")
+                        l_sl.pack_forget()
+                        s_box.pack_forget()
                     else:
                         l_ch.config(text="Objetivo:")
                         c_box.config(state="disabled")
+                        l_sl.pack_forget()
+                        s_box.pack_forget()
 
+                ch_cb.bind("<<ComboboxSelected>>", on_pl_or_ac)
                 pl_cb.bind("<<ComboboxSelected>>", on_pl_or_ac)
                 ac_cb.bind("<<ComboboxSelected>>", on_pl_or_ac)
                 on_pl_or_ac()
@@ -685,16 +712,19 @@ class ObsAndAlertsMixin:
             log_debug("[OBS] ❌ Cerrando ventanas flotantes de OBS...")
             if a1_open:
                 try:
-                    self.avatar1_window.destroy()
+                    self.global_config["obs_window_1_geo"] = self.avatar1_window.geometry()
+                    self.avatar1_window.on_close()
                 except Exception:
                     pass
                 self.avatar1_window = None
             if a2_open:
                 try:
-                    self.avatar2_window.destroy()
+                    self.global_config["obs_window_2_geo"] = self.avatar2_window.geometry()
+                    self.avatar2_window.on_close()
                 except Exception:
                     pass
                 self.avatar2_window = None
+            self.save_global_config()
             self.btn_open.config(text="🚀 ENVIAR A OBS (Abrir Avatares)", style="DSSend.TButton")
         else:
             log_debug("[OBS] 🚀 Abriendo ventanas flotantes de OBS...")
@@ -773,11 +803,12 @@ class ObsAndAlertsMixin:
             independent_mouth=self.p1_data.get("independent_mouth"),
             independent_eyes=self.p1_data.get("independent_eyes"),
             perf_mode=self.global_config.get("performance_mode", "performance"),
+            dim_on_silence=bool(self.global_config.get("dim_on_silence", False)),
         )
         self.avatar1_window.squash_enabled = self.global_config.get("squash_enabled", True)
         self.avatar1_window.congruence_enabled = self.global_config.get("congruence_enabled", True)
         self.avatar1_window.mouth_flutter_enabled = self.global_config.get("mouth_flutter_enabled", False)
-        self.avatar1_window.geometry("450x550+80+100")
+        self.avatar1_window.geometry(self.global_config.get("obs_window_1_geo", "450x550+80+100"))
         self.avatar1_window.protocol("WM_DELETE_WINDOW", lambda: self._on_avatar_window_closed(1))
         if self.btn_open:
             self.btn_open.config(text="❌ CERRAR VENTANAS OBS", style="DSBlue.TButton")
@@ -808,13 +839,13 @@ class ObsAndAlertsMixin:
             independent_mouth=self.p2_data.get("independent_mouth"),
             independent_eyes=self.p2_data.get("independent_eyes"),
             perf_mode=self.global_config.get("performance_mode", "performance"),
+            dim_on_silence=bool(self.global_config.get("dim_on_silence", False)),
         )
         self.avatar2_window.squash_enabled = self.global_config.get("squash_enabled", True)
         self.avatar2_window.congruence_enabled = self.global_config.get("congruence_enabled", True)
         self.avatar2_window.mouth_flutter_enabled = self.global_config.get("mouth_flutter_enabled", False)
-        # Si Avatar 1 no está abierto, posicionar de forma cómoda
-        x_pos = 80 if not (self.avatar1_window and self.avatar1_window.winfo_exists()) else 560
-        self.avatar2_window.geometry(f"450x550+{x_pos}+100")
+        default_geo2 = "450x550+80+100" if not (self.avatar1_window and self.avatar1_window.winfo_exists()) else "450x550+560+100"
+        self.avatar2_window.geometry(self.global_config.get("obs_window_2_geo", default_geo2))
         self.avatar2_window.protocol("WM_DELETE_WINDOW", lambda: self._on_avatar_window_closed(2))
         if self.btn_open:
             self.btn_open.config(text="❌ CERRAR VENTANAS OBS", style="DSBlue.TButton")
@@ -826,14 +857,18 @@ class ObsAndAlertsMixin:
         if avatar_num == 1:
             if self.avatar1_window:
                 try:
-                    self.avatar1_window.destroy()
+                    self.global_config["obs_window_1_geo"] = self.avatar1_window.geometry()
+                    self.save_global_config()
+                    self.avatar1_window.on_close()
                 except Exception:
                     pass
                 self.avatar1_window = None
         elif avatar_num == 2:
             if self.avatar2_window:
                 try:
-                    self.avatar2_window.destroy()
+                    self.global_config["obs_window_2_geo"] = self.avatar2_window.geometry()
+                    self.save_global_config()
+                    self.avatar2_window.on_close()
                 except Exception:
                     pass
                 self.avatar2_window = None

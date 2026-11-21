@@ -4,14 +4,48 @@ import os
 import sys
 from datetime import datetime
 
-PROFILES_FILE = "profiles.json"
-CONFIG_FILE = "config.json"
-CHARACTERS_DIR = "personajes"
+def _resolve_app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _is_dir_writable(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        test_f = os.path.join(path, ".write_test.tmp")
+        with open(test_f, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test_f)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_data_dir(app_dir):
+    if _is_dir_writable(app_dir):
+        return app_dir
+    if sys.platform.startswith("win"):
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    fallback = os.path.join(base, "PNGTuberCoop")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
+
+APP_DIR = _resolve_app_dir()
+DATA_DIR = _resolve_data_dir(APP_DIR)
+
+PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+CHARACTERS_DIR = os.path.join(DATA_DIR, "personajes")
+
 
 def get_resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+    return os.path.join(APP_DIR, relative_path)
 
 def log_debug(message):
     now = datetime.now().strftime("%H:%M:%S.%f")[:-3]

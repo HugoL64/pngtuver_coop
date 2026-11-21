@@ -93,6 +93,10 @@ class PNGTuberCoopApp(
             "mouth_flutter_enabled": False,
             "experimental_enabled": False,
             "performance_mode": "performance",
+            "dim_on_silence": False,
+            "auto_open_obs": False,
+            "obs_window_1_geo": "450x550+80+100",
+            "obs_window_2_geo": "450x550+560+100",
             "twitch_alerts": {
                 "enabled": False,
                 "port": 8765,
@@ -183,6 +187,8 @@ class PNGTuberCoopApp(
         )
         self._sync_twitch_alert_server()
         self._refresh_experimental_buttons()
+        if self.global_config.get("auto_open_obs", False):
+            self.root.after(450, self.open_avatar_windows)
 
     def _setup_styles(self):
         self.style = ttk.Style()
@@ -399,7 +405,28 @@ class PNGTuberCoopApp(
 
 
     def on_close(self):
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
         log_debug("[SISTEMA] Cerrando aplicación, guardando datos y terminando audio...")
+        for fn in (self._save_p1_profile, self._save_p2_profile, self.save_global_config):
+            try:
+                fn()
+            except Exception as e:
+                log_debug(f"[SISTEMA] Error guardando al cerrar: {e}")
+        for win_attr, geo_key in (("avatar1_window", "obs_window_1_geo"), ("avatar2_window", "obs_window_2_geo")):
+            win = getattr(self, win_attr, None)
+            if win is not None:
+                try:
+                    if win.winfo_exists():
+                        self.global_config[geo_key] = win.geometry()
+                        win.on_close()
+                except Exception:
+                    pass
+        try:
+            self.save_global_config()
+        except Exception:
+            pass
         try:
             self.hotkey_listener.stop()
         except Exception:
@@ -408,11 +435,18 @@ class PNGTuberCoopApp(
             self.twitch_alert_server.stop()
         except Exception:
             pass
-        self._save_p1_profile()
-        self._save_p2_profile()
-        self.save_global_config()
-        self.audio_engine.terminate()
-        self.root.destroy()
+        try:
+            self.audio_engine.terminate()
+        except Exception:
+            pass
+        try:
+            self.root.quit()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
         log_debug("[SISTEMA] Aplicación finalizada correctamente.")
 
 

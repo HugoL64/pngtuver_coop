@@ -268,6 +268,8 @@ class CharacterManagerMixin:
         self.p1_data["extra_expressions"] = [dict(x) for x in (prof_p1.get("extra_expressions") or [])]
 
         self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
+        if hasattr(self, "_refresh_lobby_emotion_bars"):
+            self._refresh_lobby_emotion_bars(1)
         self._refresh_p1_card_roster()
         self._sync_audio_combos_selection()
 
@@ -299,6 +301,8 @@ class CharacterManagerMixin:
         self.p2_data["extra_expressions"] = [dict(x) for x in (prof_p2.get("extra_expressions") or [])]
 
         self.p2_live_avatar.set_character(self.p2_data, prefix="a2")
+        if hasattr(self, "_refresh_lobby_emotion_bars"):
+            self._refresh_lobby_emotion_bars(2)
         self._refresh_p2_card_roster()
         self._sync_audio_combos_selection()
 
@@ -648,10 +652,9 @@ class CharacterManagerMixin:
         }
         meta_path = os.path.join(folder_path, "character.json")
         try:
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+            self._atomic_write_json(meta_path, meta)
+        except Exception as e:
+            self._report_save_error(meta_path, e)
 
     def _register_new_character_folder(self, name, mode, default_prefix="a1"):
         p1_entry = {
@@ -889,17 +892,44 @@ class CharacterManagerMixin:
         self.save_profiles_to_disk()
         self.save_global_config()
 
+    def _report_save_error(self, file_path, err):
+        msg = f"[GUARDADO] Error escribiendo '{file_path}': {err}"
+        log_debug(msg)
+        if not getattr(self, "_save_error_shown", False):
+            self._save_error_shown = True
+            try:
+                messagebox.showwarning(
+                    "No se pudo guardar",
+                    f"No se pudieron guardar los cambios en:\n{file_path}\n\n"
+                    f"Detalle: {err}\n\n"
+                    "Asegúrate de haber extraído el ZIP en una carpeta con permisos de escritura (ej. Documentos o Escritorio).",
+                    parent=getattr(self, "root", None),
+                )
+            except Exception:
+                pass
+
+    @staticmethod
+    def _atomic_write_json(file_path, data):
+        """Serializa en memoria y escribe de forma atómica (.tmp -> replace) para evitar archivos corruptos o vacíos."""
+        abs_path = os.path.abspath(file_path)
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        payload = json.dumps(data, indent=2, ensure_ascii=False)
+        tmp_path = f"{abs_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, abs_path)
+
     def save_global_config(self):
         try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.global_config, f, indent=2, ensure_ascii=False)
+            self._atomic_write_json(CONFIG_FILE, self.global_config)
         except Exception as e:
-            print(f"[Config] Error guardando config: {e}")
+            self._report_save_error(CONFIG_FILE, e)
 
     def save_profiles_to_disk(self):
         try:
-            with open(PROFILES_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.profiles, f, indent=2, ensure_ascii=False)
+            self._atomic_write_json(PROFILES_FILE, self.profiles)
         except Exception as e:
-            print(f"[Profiles] Error guardando profiles: {e}")
+            self._report_save_error(PROFILES_FILE, e)
 

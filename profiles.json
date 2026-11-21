@@ -1072,7 +1072,7 @@
       "active_emotion": 0
     },
     "Nara": {
-      "discord_source_id": "pid:4340",
+      "discord_source_id": "app:discord",
       "discord_threshold": 46,
       "scream_threshold": 89,
       "image_mode": "4_states",

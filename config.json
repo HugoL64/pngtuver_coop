@@ -1,6 +1,6 @@
 {
   "game_mode": "single",
-  "current_p1_profile": "Lisa Mochy",
+  "current_p1_profile": "Nara",
   "current_p2_profile": "Nara",
   "bg_color": "#00FF00",
   "bounce_enabled": true,
@@ -10,6 +10,10 @@
   "mouth_flutter_enabled": true,
   "experimental_enabled": true,
   "performance_mode": "performance",
+  "dim_on_silence": false,
+  "auto_open_obs": false,
+  "obs_window_1_geo": "450x550+80+100",
+  "obs_window_2_geo": "450x550+560+100",
   "twitch_alerts": {
     "enabled": true,
     "port": 8765,

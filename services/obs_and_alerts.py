@@ -5,6 +5,7 @@ import random
 import time
 
 from core.app_constants import log_debug, ScrollableFrame
+from core.emotions import get_effective_pose_data
 from ui.avatar_window import AvatarWindow
 from core.hotkeys import MODIFIER_VKS, current_modifiers, format_hotkey, pretty_key_label
 
@@ -96,6 +97,42 @@ class ObsAndAlertsMixin:
             if bool(self.audio_engine.discord_muted) != bool(muted):
                 self.audio_engine.toggle_discord_mute()
 
+    def _set_player_forced_prop(self, pnum, prop_target, enabled_val=True):
+        target_data = self.p1_data if pnum == 1 else self.p2_data
+        props_list = target_data.get("props") or []
+        t_low = str(prop_target or "").strip().lower()
+        found = None
+        for p in props_list:
+            if str(p.get("name", "")).strip().lower() == t_low or str(p.get("id", "")).strip().lower() == t_low:
+                found = p
+                break
+        if found is None:
+            return None
+        prev_en = bool(found.get("enabled", True))
+        found["enabled"] = bool(enabled_val)
+        prev = getattr(self, "p1_live_avatar" if pnum == 1 else "p2_live_avatar", None)
+        win = self.avatar1_window if pnum == 1 else self.avatar2_window
+        if prev and prev.winfo_exists():
+            prev.update_props_fast(props_list)
+        if win and win.winfo_exists():
+            win.update_props_fast(props_list)
+        return (found.get("id") or found.get("name"), prev_en)
+
+    def _set_player_forced_emotion_slot(self, pnum, slot_val):
+        target_data = self.p1_data if pnum == 1 else self.p2_data
+        prev_em = int(target_data.get("active_emotion", 0) or 0)
+        raw_s = str(slot_val or "1").split(":")[0].strip()
+        try:
+            idx = max(0, min(4, int(raw_s) - 1))
+        except Exception:
+            idx = 0
+        target_data["active_emotion"] = idx
+        prev = getattr(self, "p1_live_avatar" if pnum == 1 else "p2_live_avatar", None)
+        if prev and prev.winfo_exists():
+            prev.set_character(target_data, prefix="a1" if pnum == 1 else "a2")
+        self._sync_windows_images()
+        return prev_em
+
     def _run_next_twitch_alert(self, pnum):
         if not self._alert_queues[pnum]:
             self._alert_active[pnum] = False
@@ -121,7 +158,7 @@ class ObsAndAlertsMixin:
         except Exception:
             dur = 8.0
 
-        restore_info = {"scream": False, "mute_prev": None, "flip_prev": None}
+        restore_info = {"scream": False, "mute_prev": None, "flip_prev": None, "prop_prev": None, "emotion_prev": None}
         log_debug(f"[TWITCH] Ejecutando alerta en {pnum}P: action={action}, char='{rule.get('character', '')}', dur={dur}s")
         if action == "character":
             target_char = rule.get("character", "")
@@ -145,6 +182,12 @@ class ObsAndAlertsMixin:
             prev_f = bool(target_data.get("flip_x", False))
             restore_info["flip_prev"] = prev_f
             self._set_player_forced_flip_x(pnum, not prev_f)
+        elif action == "prop":
+            prop_res = self._set_player_forced_prop(pnum, rule.get("character", ""), True)
+            if prop_res is not None:
+                restore_info["prop_prev"] = prop_res
+        elif action == "emotion_slot":
+            restore_info["emotion_prev"] = self._set_player_forced_emotion_slot(pnum, rule.get("character", "1"))
 
         if dur <= 0.0:
             # Cambio permanente (sin restaurar al anterior)
@@ -172,6 +215,11 @@ class ObsAndAlertsMixin:
             self._set_player_forced_mute(pnum, restore_info["mute_prev"])
         if restore_info.get("flip_prev") is not None:
             self._set_player_forced_flip_x(pnum, restore_info["flip_prev"])
+        if restore_info.get("prop_prev") is not None:
+            p_id, p_prev_en = restore_info["prop_prev"]
+            self._set_player_forced_prop(pnum, p_id, p_prev_en)
+        if restore_info.get("emotion_prev") is not None:
+            self._set_player_forced_emotion_slot(pnum, int(restore_info["emotion_prev"]) + 1)
         self._run_next_twitch_alert(pnum)
 
     def _open_twitch_alerts_dialog(self):
@@ -316,6 +364,19 @@ class ObsAndAlertsMixin:
                 return sorted(self.profiles.get("player2", {}).keys())
             return sorted(self.profiles.get("player1", {}).keys())
 
+        def get_prop_names(p_val):
+            td = self.p2_data if str(p_val) == "2" else self.p1_data
+            return [str(p.get("name", "")).strip() for p in (td.get("props") or []) if str(p.get("name", "")).strip()]
+
+        def get_emotion_slot_labels(p_val):
+            td = self.p2_data if str(p_val) == "2" else self.p1_data
+            slots = td.get("emotion_slots") or []
+            out = []
+            for i in range(5):
+                nm = str(slots[i].get("name", "")).strip() if (i < len(slots) and isinstance(slots[i], dict)) else str(i + 1)
+                out.append(f"{i + 1}: {nm}" if nm and nm != str(i + 1) else str(i + 1))
+            return out
+
         def render_rules():
             for w in rules_body.winfo_children():
                 w.destroy()
@@ -331,6 +392,8 @@ class ObsAndAlertsMixin:
             ACTION_LABELS = {
                 "character": "Cambiar personaje",
                 "random_character": "Personaje aleatorio",
+                "emotion_slot": "Cambiar perfil de emoción",
+                "prop": "Activar accesorio (Prop)",
                 "scream": "Grito temporal",
                 "mute": "Silenciar (Mute)",
                 "flip_x": "Voltear (Espejo X)",
@@ -531,16 +594,30 @@ class ObsAndAlertsMixin:
                 state_badge.config(command=on_badge_click)
                 apply_card_visual_state(is_active)
 
-                def on_pl_or_ac(_e=None, fn=save_rule, p_v=r_player, a_v=r_action, c_box=ch_cb):
-                    fn()
+                def on_pl_or_ac(_e=None, fn=save_rule, p_v=r_player, a_v=r_action, c_box=ch_cb, l_ch=lbl_ch):
+                    if _e is not None:
+                        fn()
                     pv = "2" if p_v.get() == "2P" else "1"
-                    c_box["values"] = get_char_names(pv)
-                    c_box.config(state="readonly" if a_v.get() == "Cambiar personaje" else "disabled")
+                    act_lbl = a_v.get()
+                    if act_lbl == "Cambiar personaje":
+                        l_ch.config(text="Personaje al que cambia:")
+                        c_box["values"] = get_char_names(pv)
+                        c_box.config(state="readonly")
+                    elif act_lbl == "Activar accesorio (Prop)":
+                        l_ch.config(text="Accesorio (Prop):")
+                        c_box["values"] = get_prop_names(pv)
+                        c_box.config(state="readonly")
+                    elif act_lbl == "Cambiar perfil de emoción":
+                        l_ch.config(text="Perfil de emoción:")
+                        c_box["values"] = get_emotion_slot_labels(pv)
+                        c_box.config(state="readonly")
+                    else:
+                        l_ch.config(text="Objetivo:")
+                        c_box.config(state="disabled")
 
                 pl_cb.bind("<<ComboboxSelected>>", on_pl_or_ac)
                 ac_cb.bind("<<ComboboxSelected>>", on_pl_or_ac)
-                if r_action.get() != "Cambiar personaje":
-                    ch_cb.config(state="disabled")
+                on_pl_or_ac()
 
         render_rules()
 
@@ -658,12 +735,13 @@ class ObsAndAlertsMixin:
     def _get_images_dict(self, player_num):
         target = self.p1_data if player_num == 1 else self.p2_data
         pref = "a1" if player_num == 1 else "a2"
+        eff_imgs, _, _ = get_effective_pose_data(target, prefix=pref)
         imgs = {
-            "idle": target.get(f"{pref}_idle"),
-            "idle_blink": target.get(f"{pref}_idle_blink"),
-            "talk": target.get(f"{pref}_talk"),
-            "talk_blink": target.get(f"{pref}_talk_blink"),
-            "scream": target.get(f"{pref}_scream"),
+            "idle": eff_imgs.get("idle") or target.get(f"{pref}_idle"),
+            "idle_blink": eff_imgs.get("idle_blink") or target.get(f"{pref}_idle_blink"),
+            "talk": eff_imgs.get("talk") or target.get(f"{pref}_talk"),
+            "talk_blink": eff_imgs.get("talk_blink") or target.get(f"{pref}_talk_blink"),
+            "scream": eff_imgs.get("scream") or target.get(f"{pref}_scream"),
         }
         for ex in target.get("extra_expressions", []) or []:
             r_id = ex.get("role")
@@ -772,12 +850,13 @@ class ObsAndAlertsMixin:
         def _norm_motion(m):
             return "Respiración" if m == "Rebote" else m
 
+        _, eff_motions, _ = get_effective_pose_data(target, prefix=pref)
         m_dict = {
-            "idle": _norm_motion(target.get(f"{pref}_idle_motion", "Respiración")),
-            "idle_blink": _norm_motion(target.get(f"{pref}_idle_blink_motion", "Ninguna")),
-            "talk": _norm_motion(target.get(f"{pref}_talk_motion", "Respiración")),
-            "talk_blink": _norm_motion(target.get(f"{pref}_talk_blink_motion", "Ninguna")),
-            "scream": _norm_motion(target.get(f"{pref}_scream_motion", "Sacudida")),
+            "idle": _norm_motion(eff_motions.get("idle") or target.get(f"{pref}_idle_motion", "Respiración")),
+            "idle_blink": _norm_motion(eff_motions.get("idle_blink") or target.get(f"{pref}_idle_blink_motion", "Ninguna")),
+            "talk": _norm_motion(eff_motions.get("talk") or target.get(f"{pref}_talk_motion", "Respiración")),
+            "talk_blink": _norm_motion(eff_motions.get("talk_blink") or target.get(f"{pref}_talk_blink_motion", "Ninguna")),
+            "scream": _norm_motion(eff_motions.get("scream") or target.get(f"{pref}_scream_motion", "Sacudida")),
         }
         for ex in target.get("extra_expressions", []) or []:
             r_id = ex.get("role")
@@ -789,9 +868,10 @@ class ObsAndAlertsMixin:
         target = self.p1_data if player_num == 1 else self.p2_data
         pref = "a1" if player_num == 1 else "a2"
         s_dict = {}
+        _, _, eff_speeds = get_effective_pose_data(target, prefix=pref)
         for r in ("idle", "idle_blink", "talk", "talk_blink", "scream"):
             try:
-                s_dict[r] = float(target.get(f"{pref}_{r}_speed", 1.0))
+                s_dict[r] = float(eff_speeds.get(r, target.get(f"{pref}_{r}_speed", 1.0)))
             except Exception:
                 s_dict[r] = 1.0
         for ex in target.get("extra_expressions", []) or []:

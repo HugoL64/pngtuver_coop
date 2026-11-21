@@ -226,6 +226,12 @@ class AudioEngine:
         self.discord_stream = None
         self.process_captures: List[ProcessAudioCapture] = []
         self.process_monitor_active = False
+        self.mic_vowel_hint = None
+        self.discord_vowel_hint = None
+        self._mic_rate = 44100
+        self._mic_channels = 1
+        self._discord_rate = 44100
+        self._discord_channels = 2
 
         self.mic_threshold = 20.0
         self.discord_threshold = 25.0
@@ -412,6 +418,12 @@ class AudioEngine:
 
     def _stop_discord_stream(self):
         self.process_monitor_active = False
+        self.mic_vowel_hint = None
+        self.discord_vowel_hint = None
+        self._mic_rate = 44100
+        self._mic_channels = 1
+        self._discord_rate = 44100
+        self._discord_channels = 2
         if self.discord_stream:
             try:
                 self.discord_stream.stop_stream()
@@ -439,6 +451,8 @@ class AudioEngine:
                 mic_info = self.p.get_device_info_by_index(mic_device_index)
                 channels = min(2, max(1, mic_info['maxInputChannels']))
                 rate = int(mic_info['defaultSampleRate'])
+                self._mic_channels = channels
+                self._mic_rate = rate
 
                 self.mic_stream = self.p.open(
                     format=pyaudio.paInt16,
@@ -560,6 +574,7 @@ class AudioEngine:
 
     def _process_level_callback(self, pid, db):
         if getattr(self, "single_player", False) or self.discord_muted or not self.running:
+            self.discord_vowel_hint = None
             if self.on_discord_level:
                 self.on_discord_level(0.0)
             return
@@ -596,6 +611,8 @@ class AudioEngine:
             dev_info = self.p.get_device_info_by_index(dev_index)
             channels = min(2, max(1, dev_info['maxInputChannels']))
             rate = int(dev_info['defaultSampleRate'])
+            self._discord_channels = channels
+            self._discord_rate = rate
 
             self.discord_stream = self.p.open(
                 format=pyaudio.paInt16,
@@ -623,10 +640,46 @@ class AudioEngine:
         except Exception:
             return 0.0
 
+    @staticmethod
+    def _estimate_vowel_from_pcm(in_data, sample_rate, channels):
+        """Estima una vocal (vowel_a/e/i/o/u) mediante FFT ligera por bandas formánticas."""
+        if not in_data:
+            return None
+        try:
+            arr = np.frombuffer(in_data, dtype=np.int16).astype(np.float32)
+            if channels > 1 and len(arr) >= channels:
+                arr = arr[: (len(arr) // channels) * channels].reshape(-1, channels).mean(axis=1)
+            n = len(arr)
+            if n < 128:
+                return None
+            window = np.hanning(n).astype(np.float32)
+            spec = np.abs(np.fft.rfft(arr * window))
+            freqs = np.fft.rfftfreq(n, d=1.0 / max(8000.0, float(sample_rate or 44100)))
+
+            very_low = float(np.sum(spec[(freqs >= 120) & (freqs < 350)]))
+            low = float(np.sum(spec[(freqs >= 200) & (freqs < 650)]))
+            mid = float(np.sum(spec[(freqs >= 650) & (freqs < 1550)]))
+            high = float(np.sum(spec[(freqs >= 1600) & (freqs <= 3800)]))
+
+            total = low + mid + high
+            if total <= 1e-3:
+                return None
+
+            if (high / (mid + 1e-6)) > 0.72:
+                return "vowel_e" if (low / (high + 1e-6)) > 0.65 else "vowel_i"
+            if mid >= low * 0.85:
+                return "vowel_a"
+            if (very_low / (low + 1e-6)) > 0.58:
+                return "vowel_u"
+            return "vowel_o"
+        except Exception:
+            return None
+
     def _mic_callback(self, in_data, frame_count, time_info, status):
         now = time.time()
         self.mic_last_callback_time = now
         if self.mic_muted:
+            self.mic_vowel_hint = None
             if self.mic_talking:
                 self.mic_talking = False
                 if self.on_mic_state:
@@ -658,11 +711,16 @@ class AudioEngine:
                 self.mic_last_speak_time = now
 
         self._handle_scream_level("mic", level, now)
+        if level >= close_thresh:
+            self.mic_vowel_hint = self._estimate_vowel_from_pcm(in_data, self._mic_rate, self._mic_channels)
+        else:
+            self.mic_vowel_hint = None
 
         return (None, pyaudio.paContinue)
 
     def _discord_device_callback(self, in_data, frame_count, time_info, status):
         if getattr(self, "single_player", False) or self.discord_muted or not self.running:
+            self.discord_vowel_hint = None
             if self.on_discord_level:
                 self.on_discord_level(0.0)
             return (None, pyaudio.paContinue)
@@ -687,6 +745,10 @@ class AudioEngine:
                 self.discord_last_speak_time = now
 
         self._handle_scream_level("discord", level, now)
+        if level >= close_thresh:
+            self.discord_vowel_hint = self._estimate_vowel_from_pcm(in_data, self._discord_rate, self._discord_channels)
+        else:
+            self.discord_vowel_hint = None
 
         return (None, pyaudio.paContinue)
 
@@ -694,6 +756,7 @@ class AudioEngine:
         """Procesa la detección de grito sostenido en tiempo real en cada buffer."""
         if channel == "mic":
             if self.mic_muted:
+                self.mic_vowel_hint = None
                 return
             thresh = self.mic_scream_threshold
             if level >= thresh:
@@ -790,6 +853,7 @@ class AudioEngine:
     def toggle_mic_mute(self):
         self.mic_muted = not self.mic_muted
         if self.mic_muted:
+            self.mic_vowel_hint = None
             self.mic_talking = False
             if self.on_mic_state:
                 self.on_mic_state(False)

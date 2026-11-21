@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import messagebox
 import time
 from datetime import datetime
@@ -292,12 +292,15 @@ class AudioCalibrationMixin:
         p2_talk_ctx = self.discord_talking if is_coop else False
         p2_scream_ctx = p2_scream_active if is_coop else False
 
+        p1_vowel = getattr(self.audio_engine, "mic_vowel_hint", None)
+        p2_vowel = getattr(self.audio_engine, "discord_vowel_hint", None)
+
         if self.current_screen == "lobby" and not getattr(self, "_eco_mode", False):
             if self.card_view_state.get(1) == "active":
                 self.p1_live_avatar.update_state(
                     self.mic_talking, p1_scream_active,
                     muted=p1_muted, audio_level=self.mic_level, talk_threshold=p1_thresh,
-                    partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx
+                    partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx, vowel_hint=p1_vowel
                 )
                 self._draw_mini_meter(
                     self.p1_mini_meter,
@@ -322,7 +325,7 @@ class AudioCalibrationMixin:
                 self.p2_live_avatar.update_state(
                     self.discord_talking, p2_scream_active,
                     muted=p2_muted, audio_level=self.discord_level, talk_threshold=p2_thresh,
-                    partner_talking=self.mic_talking, partner_screaming=p1_scream_active
+                    partner_talking=self.mic_talking, partner_screaming=p1_scream_active, vowel_hint=p2_vowel
                 )
                 self._draw_mini_meter(
                     self.p2_mini_meter,
@@ -348,7 +351,7 @@ class AudioCalibrationMixin:
                 self.w_live_avatar.update_state(
                     self.mic_talking, p1_scream_active,
                     muted=p1_muted, audio_level=self.mic_level, talk_threshold=p1_thresh,
-                    partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx
+                    partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx, vowel_hint=p1_vowel
                 )
                 self._draw_workshop_meter(
                     self.mic_level, p1_thresh, self.mic_talking, p1_scream_active,
@@ -358,7 +361,7 @@ class AudioCalibrationMixin:
                 self.w_live_avatar.update_state(
                     self.discord_talking, p2_scream_active,
                     muted=p2_muted, audio_level=self.discord_level, talk_threshold=p2_thresh,
-                    partner_talking=self.mic_talking, partner_screaming=p1_scream_active
+                    partner_talking=self.mic_talking, partner_screaming=p1_scream_active, vowel_hint=p2_vowel
                 )
                 self._draw_workshop_meter(
                     self.discord_level, p2_thresh, self.discord_talking, p2_scream_active,
@@ -372,14 +375,14 @@ class AudioCalibrationMixin:
             self.avatar1_window.set_screaming(p1_scream_active)
             self.avatar1_window.update_extra_context(
                 muted=p1_muted, audio_level=self.mic_level, talk_threshold=p1_thresh,
-                partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx
+                partner_talking=p2_talk_ctx, partner_screaming=p2_scream_ctx, vowel_hint=p1_vowel
             )
         if a2_open:
             self.avatar2_window.set_talking(self.discord_talking)
             self.avatar2_window.set_screaming(p2_scream_active)
             self.avatar2_window.update_extra_context(
                 muted=p2_muted, audio_level=self.discord_level, talk_threshold=p2_thresh,
-                partner_talking=self.mic_talking, partner_screaming=p1_scream_active
+                partner_talking=self.mic_talking, partner_screaming=p1_scream_active, vowel_hint=p2_vowel
             )
         if not a1_open and not a2_open and "CERRAR" in self.btn_open.cget("text"):
             self.btn_open.config(text="🚀 ENVIAR A OBS (Abrir Avatares)", style="DSSend.TButton")

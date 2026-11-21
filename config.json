@@ -1,8 +1,8 @@
 {
   "game_mode": "single",
-  "current_p1_profile": "Nara",
-  "current_p2_profile": "Lisa Mochy",
-  "bg_color": "#0000FF",
+  "current_p1_profile": "Lisa Mochy",
+  "current_p2_profile": "Nara",
+  "bg_color": "#00FF00",
   "bounce_enabled": true,
   "squash_enabled": true,
   "hysteresis_enabled": false,
@@ -53,26 +53,12 @@
       "name": "Gatito Azul"
     },
     {
-      "type": "folder",
-      "id": "fld_1794882207089_1",
-      "name": "Carpeta 1",
-      "expanded": true,
-      "items": [
-        "Osito Discord",
-        "defy"
-      ]
+      "type": "char",
+      "name": "Osito Discord"
     },
     {
       "type": "char",
       "name": "Lisa Mochy"
-    },
-    {
-      "type": "char",
-      "name": "Lisa Mochi"
-    },
-    {
-      "type": "char",
-      "name": "defy 2"
     },
     {
       "type": "char",

@@ -6,6 +6,7 @@ import time
 import math
 import gc
 from core.async_loader import get_performance_preset, load_pil_frames_from_path, resize_avatar_frames, submit_bg_task
+from core.win32_alpha import IS_WINDOWS, Win32LayeredRenderer
 from core.lipsync import (
     MouthLipsyncEngine,
     MouthRenderCache,
@@ -16,6 +17,7 @@ from core.eyes import (
     EyesRenderCache,
     compute_mouse_eye_offset,
     is_independent_eyes_active,
+    resolve_eye_set_for_role,
     resolve_eyes_frame_config,
 )
 
@@ -26,9 +28,12 @@ class AvatarWindow(tk.Toplevel):
         self.title(title)
         self.geometry("450x550")
         self.minsize(200, 200)
-        self.configure(bg=bg_color)
-
         self.bg_color = bg_color
+        self.is_transparent = (str(bg_color).upper() == "TRANSPARENT") and IS_WINDOWS
+        self._layered = Win32LayeredRenderer()
+        self._drag_origin = None
+        tk_bg = "#000000" if str(bg_color).upper() == "TRANSPARENT" else bg_color
+        self.configure(bg=tk_bg)
         self.bounce_enabled = bounce_enabled
         self.squash_enabled = True
         self.squash_state = 0
@@ -42,6 +47,7 @@ class AvatarWindow(tk.Toplevel):
         self.is_screaming = False
         self.is_muted = False
         self.audio_level = 0.0
+        self.vowel_hint = None
         self.talk_threshold = 20.0
         self.partner_talking = False
         self.partner_screaming = False
@@ -98,6 +104,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_cache = {}
         # Caché bajo demanda para Squash & Stretch: { (key, idx, squash_state): PhotoImage }
         self.squash_photo_cache = {}
+        self.squash_pil_cache = {}
         self._last_window_size = (0, 0)
 
         # Control de reproducción de frames para expresiones animadas (GIF / APNG)
@@ -116,7 +123,8 @@ class AvatarWindow(tk.Toplevel):
         self.blink_end_time = 0.0
 
         # Canvas para renderizado sin bordes
-        self.canvas = tk.Canvas(self, bg=self.bg_color, highlightthickness=0)
+        tk_bg = "#000000" if str(self.bg_color).upper() == "TRANSPARENT" else self.bg_color
+        self.canvas = tk.Canvas(self, bg=tk_bg, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
         # Elementos persistentes en el Canvas (reutilizados para eliminar todo parpadeo)
@@ -133,6 +141,11 @@ class AvatarWindow(tk.Toplevel):
         self.bind("<KeyPress-m>", lambda e: self._toggle_mute_local())
         self.bind("<KeyPress-M>", lambda e: self._toggle_mute_local())
         self.bind("<KeyPress>", self._on_window_key_press)
+        self.canvas.bind("<ButtonPress-1>", self._on_alpha_drag_start)
+        self.canvas.bind("<B1-Motion>", self._on_alpha_drag_move)
+        self.canvas.bind("<Button-3>", self._on_alpha_context_menu)
+        if self.is_transparent:
+            self.after(20, self._enable_transparent_mode)
 
         # Iniciar bucle de animación a 60 FPS
         self._animate_loop()
@@ -229,6 +242,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_cache.clear()
         self.base_resized_images.clear()
         self.squash_photo_cache.clear()
+        self.squash_pil_cache.clear()
         gc.collect()
 
         for key, flist in resized_imgs.items():
@@ -252,6 +266,7 @@ class AvatarWindow(tk.Toplevel):
                 "_scale": cp.get("scale", 1.0),
                 "_rotation": float(cp.get("rotation", 0)),
                 "frames": [(ImageTk.PhotoImage(fr), dur) for fr, dur in s_frames],
+                "pil_frames": s_frames,
                 "layer": cp.get("layer", "front"),
                 "follows_bounce": cp.get("follows_bounce", False),
                 "offset_x": cp.get("offset_x", 0),
@@ -277,6 +292,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_cache.clear()
         self.base_resized_images.clear()
         self.squash_photo_cache.clear()
+        self.squash_pil_cache.clear()
         gc.collect()
         for key, frame_list in self.cached_images.items():
             if not frame_list:
@@ -310,6 +326,7 @@ class AvatarWindow(tk.Toplevel):
         self.photo_props.clear()
         for cp in self.cached_props:
             prop_scaled_frames = []
+            prop_pil_frames = []
             scale_factor = cp.get("scale", 1.0)
             rot_deg = float(cp.get("rotation", 0))
             for raw_img, dur_sec in cp["raw_frames"]:
@@ -322,11 +339,13 @@ class AvatarWindow(tk.Toplevel):
                 resized = raw_img.resize((base_w, base_h), Image.Resampling.LANCZOS)
                 if rot_deg != 0:
                     resized = resized.rotate(-rot_deg, resample=Image.Resampling.BICUBIC, expand=True)
+                prop_pil_frames.append((resized, dur_sec))
                 prop_scaled_frames.append((ImageTk.PhotoImage(resized), dur_sec))
 
             self.photo_props.append({
                 "id": cp["id"],
                 "frames": prop_scaled_frames,
+                "pil_frames": prop_pil_frames,
                 "layer": cp["layer"],
                 "follows_bounce": cp["follows_bounce"],
                 "offset_x": cp["offset_x"],
@@ -413,8 +432,10 @@ class AvatarWindow(tk.Toplevel):
             old_pp = old_photo_by_id.get(pid)
             if old_pp and old_pp.get("_file") == f_path and old_pp.get("_scale") == sc_factor and old_pp.get("_rotation") == rot_deg:
                 prop_scaled_frames = old_pp["frames"]
+                prop_pil_frames = old_pp.get("pil_frames", [])
             else:
                 prop_scaled_frames = []
+                prop_pil_frames = []
                 for raw_img, dur_sec in p_frames:
                     img_w, img_h = raw_img.size
                     if img_w <= 0 or img_h <= 0:
@@ -425,6 +446,7 @@ class AvatarWindow(tk.Toplevel):
                     resized = raw_img.resize((base_w, base_h), Image.Resampling.BILINEAR)
                     if rot_deg != 0:
                         resized = resized.rotate(-rot_deg, resample=Image.Resampling.BILINEAR, expand=True)
+                    prop_pil_frames.append((resized, dur_sec))
                     prop_scaled_frames.append((ImageTk.PhotoImage(resized), dur_sec))
 
             new_photos.append({
@@ -433,6 +455,7 @@ class AvatarWindow(tk.Toplevel):
                 "_scale": sc_factor,
                 "_rotation": rot_deg,
                 "frames": prop_scaled_frames,
+                "pil_frames": prop_pil_frames,
                 "layer": p.get("layer", "front"),
                 "follows_bounce": bool(p.get("follows_bounce", False)),
                 "offset_x": int(p.get("offset_x", 0)),
@@ -472,11 +495,12 @@ class AvatarWindow(tk.Toplevel):
         self._pending_key = None
         self.load_images()
 
-    def update_extra_context(self, muted=None, audio_level=None, talk_threshold=None, partner_talking=None, partner_screaming=None):
+    def update_extra_context(self, muted=None, audio_level=None, talk_threshold=None, partner_talking=None, partner_screaming=None, vowel_hint=None):
         if muted is not None:
             self.is_muted = bool(muted)
         if audio_level is not None:
             self.audio_level = float(audio_level)
+        self.vowel_hint = vowel_hint
         if talk_threshold is not None:
             self.talk_threshold = float(talk_threshold)
         if partner_talking is not None:
@@ -540,11 +564,20 @@ class AvatarWindow(tk.Toplevel):
 
     def update_bg_color(self, color):
         self.bg_color = color
-        self.configure(bg=color)
-        self.canvas.configure(bg=color)
-        if self.placeholder_item is not None:
+        want_trans = (str(color).upper() == "TRANSPARENT") and IS_WINDOWS
+        if want_trans != self.is_transparent:
+            self.is_transparent = want_trans
+            if want_trans:
+                self._enable_transparent_mode()
+            else:
+                self._disable_transparent_mode()
+        tk_bg = "#000000" if want_trans else color
+        self.configure(bg=tk_bg)
+        self.canvas.configure(bg=tk_bg)
+        if self.placeholder_item is not None and not want_trans:
             text_color = "#333333" if color.upper() not in ("#000000", "BLACK") else "#FFFFFF"
             self.canvas.itemconfig(self.placeholder_item, fill=text_color)
+        self._update_display()
 
     def set_talking(self, talking):
         if self.is_muted:
@@ -853,6 +886,8 @@ class AvatarWindow(tk.Toplevel):
                 self.is_muted,
                 self.mouth_cache.pil_frames.keys(),
                 squash_strength=self.independent_mouth.get("squash_strength", 100),
+                mode=self.independent_mouth.get("mode", "volume"),
+                vowel_hint=getattr(self, "vowel_hint", None),
             )
             if new_slot != self._mouth_slot or new_msquash != self._mouth_squash:
                 self._mouth_slot = new_slot
@@ -896,6 +931,7 @@ class AvatarWindow(tk.Toplevel):
         res = ImageTk.PhotoImage(deformed)
         if len(self.squash_photo_cache) >= get_performance_preset(getattr(self, "perf_mode", "performance"))["squash_cache_max"]:
             self.squash_photo_cache.clear()
+        self.squash_pil_cache.clear()
         self.squash_photo_cache[cache_key] = res
         return res
 
@@ -1127,6 +1163,9 @@ class AvatarWindow(tk.Toplevel):
         return base_x, base_y - (av_h // 2), pos_scale
 
     def _update_position_only(self):
+        if getattr(self, "is_transparent", False):
+            self._render_transparent_composite()
+            return
         w = self.canvas.winfo_width()
         h = self.canvas.winfo_height()
         if w <= 20 or h <= 20:
@@ -1166,6 +1205,9 @@ class AvatarWindow(tk.Toplevel):
                     self.canvas.itemconfig(item_id, state="hidden")
 
     def _update_display(self):
+        if getattr(self, "is_transparent", False):
+            self._render_transparent_composite()
+            return
         w = self.canvas.winfo_width()
         h = self.canvas.winfo_height()
         if w <= 20 or h <= 20:
@@ -1391,29 +1433,43 @@ class AvatarWindow(tk.Toplevel):
         active_key = self._get_active_key()
         self._update_eyes_position_only(av_cx, av_cy, pos_scale, active_key)
 
+    def _resolve_eyes_draw_params(self, av_cx, av_cy, pos_scale, active_key):
+        if not is_independent_eyes_active(self.independent_eyes):
+            return None
+        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, active_key)
+        if hidden:
+            return None
+        set_id, set_cfg = resolve_eye_set_for_role(self.independent_eyes, active_key)
+        if set_id == "none" or set_cfg is None:
+            return None
+        bx, by = self._get_eyes_base_coords(av_cx, av_cy, pos_scale, ox, oy)
+        if set_cfg.get("track_mouse", True):
+            self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
+                self.canvas, bx, by, pos_scale, set_cfg, self._eye_ox, self._eye_oy
+            )
+        else:
+            self._eye_ox, self._eye_oy = 0.0, 0.0
+        eff_rot = -rot_deg if self.flip_x else rot_deg
+        show_mask = bool(set_cfg.get("show_mask", False))
+        return bx, by, sc_pct, eff_rot, set_id, show_mask
+
     def _update_eyes_position_only(self, av_cx, av_cy, pos_scale, active_key):
         if self.eyes_item is None:
             return
-        if not is_independent_eyes_active(self.independent_eyes):
+        params = self._resolve_eyes_draw_params(av_cx, av_cy, pos_scale, active_key)
+        if params is None:
             self.canvas.itemconfig(self.eyes_item, state="hidden")
             return
-        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, active_key)
-        if hidden:
-            self.canvas.itemconfig(self.eyes_item, state="hidden")
-            return
-        bx, by = self._get_eyes_base_coords(av_cx, av_cy, pos_scale, ox, oy)
-        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
-            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
-        )
-        if self.eyes_cache.has_mask_or_overlay():
-            eff_rot = -rot_deg if self.flip_x else rot_deg
+        bx, by, sc_pct, eff_rot, set_id, show_mask = params
+        if self.eyes_cache.has_mask_or_overlay(set_id=set_id):
             e_photo, anchored = self.eyes_cache.get_tk_image(
                 pos_scale,
                 scale_pct=sc_pct,
                 rotation=eff_rot,
                 eye_ox=self._eye_ox,
                 eye_oy=self._eye_oy,
-                show_mask=bool(self.independent_eyes.get("show_mask", False)),
+                show_mask=show_mask,
+                set_id=set_id,
             )
             if e_photo is not None:
                 self.canvas.itemconfig(self.eyes_item, image=e_photo, state="normal")
@@ -1425,29 +1481,21 @@ class AvatarWindow(tk.Toplevel):
             self.canvas.itemconfig(self.eyes_item, state="normal")
 
     def _render_eyes_item(self, av_cx, av_cy, pos_scale, active_key):
-        if not is_independent_eyes_active(self.independent_eyes):
+        params = self._resolve_eyes_draw_params(av_cx, av_cy, pos_scale, active_key)
+        if params is None:
             if self.eyes_item is not None:
                 self.canvas.itemconfig(self.eyes_item, state="hidden")
             return None
 
-        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, active_key)
-        if hidden:
-            if self.eyes_item is not None:
-                self.canvas.itemconfig(self.eyes_item, state="hidden")
-            return None
-
-        bx, by = self._get_eyes_base_coords(av_cx, av_cy, pos_scale, ox, oy)
-        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
-            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
-        )
-        eff_rot = -rot_deg if self.flip_x else rot_deg
+        bx, by, sc_pct, eff_rot, set_id, show_mask = params
         e_photo, anchored = self.eyes_cache.get_tk_image(
             pos_scale,
             scale_pct=sc_pct,
             rotation=eff_rot,
             eye_ox=self._eye_ox,
             eye_oy=self._eye_oy,
-            show_mask=bool(self.independent_eyes.get("show_mask", False)),
+            show_mask=show_mask,
+            set_id=set_id,
         )
         if e_photo is None:
             if self.eyes_item is not None:
@@ -1463,15 +1511,188 @@ class AvatarWindow(tk.Toplevel):
         self.canvas.current_eyes_photo = e_photo
         return self.eyes_item
 
+    def _enable_transparent_mode(self):
+        if not IS_WINDOWS or not self.winfo_exists():
+            return
+        try:
+            self.overrideredirect(True)
+            self.update_idletasks()
+            self._layered.attach(self, True)
+            self._render_transparent_composite()
+        except Exception:
+            pass
+
+    def _disable_transparent_mode(self):
+        if not IS_WINDOWS or not self.winfo_exists():
+            return
+        try:
+            self._layered.dispose()
+            self.overrideredirect(False)
+            self._layered.attach(self, False)
+            self.update_idletasks()
+        except Exception:
+            pass
+
+    def _on_alpha_drag_start(self, event):
+        if not getattr(self, "is_transparent", False):
+            return
+        self._drag_origin = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+    def _on_alpha_drag_move(self, event):
+        if not getattr(self, "is_transparent", False) or not self._drag_origin:
+            return
+        nx = event.x_root - self._drag_origin[0]
+        ny = event.y_root - self._drag_origin[1]
+        self.geometry(f"+{nx}+{ny}")
+
+    def _on_alpha_context_menu(self, event):
+        if not getattr(self, "is_transparent", False):
+            return
+        menu = tk.Menu(self, tearoff=0)
+        for label, gw, gh in (("Pequeño (350x420)", 350, 420), ("Normal (450x550)", 450, 550), ("Grande (600x720)", 600, 720)):
+            menu.add_command(
+                label=label,
+                command=lambda w=gw, h=gh: (self.geometry(f"{w}x{h}"), self._on_resize())
+            )
+        menu.add_separator()
+        menu.add_command(label="Cerrar ventana", command=self.on_close)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _get_squash_pil(self, active_key, frame_idx):
+        pil_list = self.base_resized_images.get(active_key) or self.base_resized_images.get("idle")
+        if not pil_list:
+            return None
+        idx = frame_idx % len(pil_list)
+        base_img = pil_list[idx]
+        if self.squash_state == 0:
+            return base_img
+        cache_key = (active_key, idx, self.squash_state)
+        cached = self.squash_pil_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        scale_map = {
+            -2: (1.07, 0.93),
+            -1: (1.04, 0.96),
+            1: (0.96, 1.04),
+            2: (0.93, 1.07),
+        }
+        sx, sy = scale_map.get(self.squash_state, (1.0, 1.0))
+        nw = max(1, int(base_img.width * sx))
+        nh = max(1, int(base_img.height * sy))
+        res = base_img.resize((nw, nh), Image.Resampling.BILINEAR)
+        if len(self.squash_pil_cache) >= get_performance_preset(getattr(self, "perf_mode", "performance"))["squash_cache_max"]:
+            self.squash_pil_cache.clear()
+        self.squash_pil_cache[cache_key] = res
+        return res
+
+    @staticmethod
+    def _alpha_blit(dest, src, x, y):
+        if src is None:
+            return
+        dw, dh = dest.size
+        sw, sh = src.size
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(dw, x + sw)
+        y1 = min(dh, y + sh)
+        if x1 <= x0 or y1 <= y0:
+            return
+        sx0 = x0 - x
+        sy0 = y0 - y
+        crop = src.crop((sx0, sy0, sx0 + (x1 - x0), sy0 + (y1 - y0)))
+        dest.alpha_composite(crop, (x0, y0))
+
+    def _render_transparent_composite(self):
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w <= 20 or h <= 20:
+            w, h = 450, 550
+        padding = 20
+        base_x = w // 2
+        base_y = h - padding
+
+        active_key = self._get_active_key()
+        body_pil = self._get_squash_pil(active_key, self.anim_frame_idx) if active_key else None
+        if body_pil is not None:
+            self._last_avatar_h = body_pil.height
+        av_cx, av_cy, pos_scale = self._get_avatar_center_and_scale(w, h, padding)
+
+        comp = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+
+        def draw_prop_pil(prop):
+            pframes = prop.get("pil_frames")
+            if not prop.get("enabled") or not pframes or not self._is_prop_visible_for_role(prop, active_key):
+                return
+            p_pil = pframes[self.anim_frame_idx % len(pframes)][0]
+            dx = int(prop["offset_x"] * pos_scale)
+            dy = int(prop["offset_y"] * pos_scale)
+            if prop.get("follows_bounce"):
+                px = av_cx + dx + self.jitter_x
+                py = av_cy + dy + int(self.current_offset_y) + self.jitter_y
+            else:
+                px = av_cx + dx
+                py = av_cy + dy
+            self._alpha_blit(comp, p_pil, px - p_pil.width // 2, py - p_pil.height // 2)
+
+        for p in self.photo_props:
+            if p.get("layer") == "back":
+                draw_prop_pil(p)
+
+        if body_pil is not None:
+            pos_x = base_x + self.jitter_x
+            pos_y = base_y + int(self.current_offset_y) + self.jitter_y
+            self._alpha_blit(comp, body_pil, pos_x - body_pil.width // 2, pos_y - body_pil.height)
+
+        if is_independent_eyes_active(self.independent_eyes):
+            params = self._resolve_eyes_draw_params(av_cx, av_cy, pos_scale, active_key)
+            if params is not None:
+                bx, by, sc_pct, eff_rot, set_id, show_mask = params
+                e_pil, anchored = self.eyes_cache.get_composed_pil(
+                    pos_scale, scale_pct=sc_pct, rotation=eff_rot,
+                    eye_ox=self._eye_ox, eye_oy=self._eye_oy,
+                    show_mask=show_mask, set_id=set_id,
+                )
+                if e_pil is not None:
+                    ex, ey = (bx, by) if anchored else (bx + self._eye_ox, by + self._eye_oy)
+                    self._alpha_blit(comp, e_pil, int(round(ex)) - e_pil.width // 2, int(round(ey)) - e_pil.height // 2)
+
+        if is_independent_mouth_active(self.independent_mouth):
+            hidden_m, ox_m, oy_m, sc_m, rot_m, ov_key = resolve_mouth_frame_config(self.independent_mouth, active_key)
+            if not hidden_m:
+                eff_rot_m = -rot_m if self.flip_x else rot_m
+                m_pil = self.mouth_cache.get_pil(
+                    self._mouth_slot, ov_key, self.anim_frame_idx, self._mouth_squash,
+                    pos_scale, sc_m, eff_rot_m,
+                    max_cache=get_performance_preset(getattr(self, "perf_mode", "performance"))["mouth_cache_max"],
+                )
+                if m_pil is not None:
+                    mx, my = self._get_mouth_coords(av_cx, av_cy, pos_scale, ox_m, oy_m)
+                    self._alpha_blit(comp, m_pil, mx - m_pil.width // 2, my - m_pil.height // 2)
+
+        for p in self.photo_props:
+            if p.get("layer") != "back":
+                draw_prop_pil(p)
+
+        self._layered.push_pil_rgba(comp, self.winfo_x(), self.winfo_y())
+
     def _render_current_frame(self):
         """Compatibilidad con llamadas externas existentes."""
         self._update_display()
 
     def on_close(self):
+        try:
+            self._layered.dispose()
+        except Exception:
+            pass
         self.cached_images.clear()
         self.base_resized_images.clear()
         self.photo_cache.clear()
         self.squash_photo_cache.clear()
+        self.squash_pil_cache.clear()
+        self.squash_pil_cache.clear()
         self.cached_props.clear()
         self.photo_props.clear()
         self.mouth_cache.clear()

@@ -10,8 +10,15 @@ import time
 from core.app_constants import EXTRA_EXPRESSION_CATALOG, log_debug, ScrollableFrame
 from ui.live_avatar_preview import LiveAvatarPreview
 from core.hotkeys import format_hotkey, pretty_key_label
+from core.emotions import (
+    BASE_POSE_ROLES,
+    default_emotion_slots,
+    get_effective_pose_data,
+    normalize_emotion_slots,
+)
 from core.lipsync import (
     MOUTH_SLOTS,
+    VOWEL_SLOTS,
     MOUTH_SLOT_LABELS,
     MouthLipsyncEngine,
     MouthRenderCache,
@@ -23,9 +30,11 @@ from core.lipsync import (
 from core.eyes import (
     EyesRenderCache,
     compute_mouse_eye_offset,
+    default_eye_set,
     default_independent_eyes,
     has_eyes_sprite,
     normalize_independent_eyes,
+    resolve_eye_set_for_role,
     resolve_eyes_frame_config,
 )
 
@@ -48,50 +57,39 @@ class WorkshopMixin:
         self.w_char_title = tk.Label(top_w, text="📁 Gatito Azul", font=("Segoe UI", 11, "bold"), bg="#FFFFFF", fg="#1E293B")
         self.w_char_title.pack(side=tk.LEFT)
 
-        self.w_mode_badge = tk.Label(
-            top_w, text="✨ Modo Pro (4 poses)",
-            font=("Segoe UI", 8, "bold"), bg="#E0F2FE", fg="#0369A1", padx=8, pady=2
-        )
-        self.w_mode_badge.pack(side=tk.LEFT, padx=(10, 0))
+        self.w_emotion_bar = tk.Frame(top_w, bg="#FFFFFF")
+        self.w_emotion_bar.pack(side=tk.LEFT, padx=(10, 0))
+        self.w_emotion_btns = []
+        for em_i in range(5):
+            eb = tk.Button(
+                self.w_emotion_bar, text=str(em_i + 1), font=("Segoe UI", 8, "bold"),
+                bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+                command=lambda idx=em_i: self._select_emotion_slot(idx)
+            )
+            eb.bind("<Button-3>", lambda e, idx=em_i: self._on_emotion_slot_right_click(e, idx))
+            eb.pack(side=tk.LEFT, padx=2)
+            self.w_emotion_btns.append(eb)
 
         mouth_hdr_f = tk.Frame(top_w, bg="#FFFFFF")
         mouth_hdr_f.pack(side=tk.RIGHT)
 
+        self.w_indep_eyes_var = tk.BooleanVar(value=False)
         self.w_eyes_cfg_btn = tk.Button(
-            mouth_hdr_f, text="👀 Configurar Ojos", font=("Segoe UI", 8, "bold"),
-            bg="#E0F2FE", fg="#0369A1", activebackground="#3671C6", activeforeground="#FFFFFF",
-            relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+            mouth_hdr_f, text="👀 Ojos", font=("Segoe UI", 8, "bold"),
+            bg="#F1F5F9", fg="#334155", activebackground="#3671C6", activeforeground="#FFFFFF",
+            relief="solid", bd=1, padx=10, pady=2, cursor="hand2",
             command=self._open_independent_eyes_dialog
         )
-        self.w_eyes_cfg_btn.pack(side=tk.RIGHT, padx=(6, 0))
-
-        self.w_indep_eyes_var = tk.BooleanVar(value=False)
-        self.w_indep_eyes_check = tk.Checkbutton(
-            mouth_hdr_f, text="Ojos al mouse",
-            variable=self.w_indep_eyes_var, command=self._on_workshop_indep_eyes_toggle,
-            bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0", activeforeground="#0F172A",
-            selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2",
-            padx=6, pady=1, relief="solid", bd=1
-        )
-        self.w_indep_eyes_check.pack(side=tk.RIGHT, padx=(10, 0))
-
-        self.w_mouth_cfg_btn = tk.Button(
-            mouth_hdr_f, text="👄 Configurar Boca", font=("Segoe UI", 8, "bold"),
-            bg="#E0F2FE", fg="#0369A1", activebackground="#3671C6", activeforeground="#FFFFFF",
-            relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
-            command=self._open_independent_mouth_dialog
-        )
-        self.w_mouth_cfg_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        self.w_eyes_cfg_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
         self.w_indep_mouth_var = tk.BooleanVar(value=False)
-        self.w_indep_mouth_check = tk.Checkbutton(
-            mouth_hdr_f, text="Boca independiente",
-            variable=self.w_indep_mouth_var, command=self._on_workshop_indep_mouth_toggle,
-            bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0", activeforeground="#0F172A",
-            selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2",
-            padx=6, pady=1, relief="solid", bd=1
+        self.w_mouth_cfg_btn = tk.Button(
+            mouth_hdr_f, text="👄 Boca", font=("Segoe UI", 8, "bold"),
+            bg="#F1F5F9", fg="#334155", activebackground="#3671C6", activeforeground="#FFFFFF",
+            relief="solid", bd=1, padx=10, pady=2, cursor="hand2",
+            command=self._open_independent_mouth_dialog
         )
-        self.w_indep_mouth_check.pack(side=tk.RIGHT)
+        self.w_mouth_cfg_btn.pack(side=tk.RIGHT)
 
         w_body = tk.Frame(self.workshop_frame, bg="#DFE5EE")
         w_body.pack(fill=tk.BOTH, expand=True)
@@ -303,11 +301,7 @@ class WorkshopMixin:
             self._update_eyes_switch_style(e_on)
         self.w_live_avatar.set_character(target_data, prefix=prefix)
 
-        mode = target_data.get("image_mode", "4_states")
-        if mode == "4_states":
-            self.w_mode_badge.config(text="✨ Modo Pro (4 poses)", bg="#E0F2FE", fg="#0369A1")
-        else:
-            self.w_mode_badge.config(text="⚡ Modo Simple (2 poses)", bg="#FEF3C7", fg="#92400E")
+        self._refresh_emotion_slots_bar(target_data)
 
         self.w_thresh_scale.set(thresh_val)
         self.w_thresh_val_lbl.config(text=f"{int(thresh_val)}%")
@@ -853,10 +847,19 @@ class WorkshopMixin:
         )
         card.grid(row=row_idx, column=col_idx, padx=6, pady=6, sticky="nsew")
 
+        is_p1_card = (target_dict is self.p1_data)
+        pref_card = "a1" if is_p1_card else "a2"
+        active_em = self._get_active_emotion_idx(target_dict)
+        is_base_role = (role_id in BASE_POSE_ROLES) and (key == f"{pref_card}_{role_id}")
+        slot_obj = self._get_emotion_slot_obj(target_dict, active_em) if (is_base_role and active_em > 0) else None
+        own_img = (slot_obj.get("images") or {}).get(role_id) if slot_obj else target_dict.get(key)
+        is_inherited = bool(slot_obj is not None and not own_img)
+        disp_title = f"{title_text} (de 1)" if is_inherited else title_text
+
         # Título arriba
         title_lbl = tk.Label(
-            card, text=title_text, font=("Segoe UI", 9, "bold"),
-            bg="#FFFFFF", fg="#1E293B", cursor="hand2"
+            card, text=disp_title, font=("Segoe UI", 9, "bold"),
+            bg="#FFFFFF", fg="#64748B" if is_inherited else "#1E293B", cursor="hand2"
         )
         title_lbl.pack(anchor=tk.W, pady=(0, 4))
 
@@ -917,7 +920,10 @@ class WorkshopMixin:
 
         # Selector de animación inferior
         motion_options = ["Ninguna", "Respiración", "Saltitos", "Elástico", "Balanceo", "Sacudida", "Flotar"]
-        current_motion = target_dict.get(f"{key}_motion")
+        if slot_obj is not None:
+            current_motion = (slot_obj.get("motions") or {}).get(role_id) or target_dict.get(f"{key}_motion")
+        else:
+            current_motion = target_dict.get(f"{key}_motion")
         if current_motion == "Rebote":
             current_motion = "Respiración"
         if not current_motion:
@@ -941,7 +947,10 @@ class WorkshopMixin:
         motion_menu.pack(fill=tk.X)
 
         # Control de velocidad individual de la animación
-        curr_speed = target_dict.get(f"{key}_speed", 1.0)
+        if slot_obj is not None:
+            curr_speed = (slot_obj.get("motion_speeds") or {}).get(role_id, target_dict.get(f"{key}_speed", 1.0))
+        else:
+            curr_speed = target_dict.get(f"{key}_speed", 1.0)
         try:
             curr_speed = max(0.3, min(3.0, float(curr_speed)))
         except Exception:
@@ -960,8 +969,8 @@ class WorkshopMixin:
             val = motion_var.get()
             spd = round(float(speed_scale.get()), 2)
             speed_val_lbl.config(text=f"{spd:.1f}x")
-            target_dict[f"{key}_motion"] = val
-            target_dict[f"{key}_speed"] = spd
+            target_dict[f"{key}_motion"] = val if slot_obj is None else target_dict.get(f"{key}_motion", val)
+            target_dict[f"{key}_speed"] = spd if slot_obj is None else target_dict.get(f"{key}_speed", spd)
             is_p1 = (target_dict is self.p1_data)
             curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
             for p_key, pref, rt_dict in (
@@ -971,8 +980,14 @@ class WorkshopMixin:
                 prof = self.profiles.get(p_key, {}).get(curr_name)
                 for d in (prof, rt_dict):
                     if isinstance(d, dict):
-                        d[f"{pref}_{role_id}_motion"] = val
-                        d[f"{pref}_{role_id}_speed"] = spd
+                        if slot_obj is not None:
+                            slots = d.setdefault("emotion_slots", default_emotion_slots())
+                            if active_em < len(slots):
+                                slots[active_em].setdefault("motions", {})[role_id] = val
+                                slots[active_em].setdefault("motion_speeds", {})[role_id] = spd
+                        else:
+                            d[f"{pref}_{role_id}_motion"] = val
+                            d[f"{pref}_{role_id}_speed"] = spd
             self._save_character_folder_meta(curr_name)
             if is_p1:
                 self._save_p1_profile()
@@ -994,16 +1009,30 @@ class WorkshopMixin:
     def _clear_base_pose_image(self, key, role_id, target_dict):
         is_p1 = (target_dict is self.p1_data)
         curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
-        target_dict[key] = ""
-        for p_key, pref, rt_dict in (
-            ("player1", "a1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
-            ("player2", "a2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
-        ):
-            prof = self.profiles.get(p_key, {}).get(curr_name)
-            for d in (prof, rt_dict):
-                if isinstance(d, dict):
-                    d[f"{pref}_{role_id}"] = ""
-        self._update_thumbnail(key)
+        active_em = self._get_active_emotion_idx(target_dict)
+        if active_em > 0 and role_id in BASE_POSE_ROLES:
+            for p_key, rt_dict in (
+                ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+            ):
+                prof = self.profiles.get(p_key, {}).get(curr_name)
+                for d in (prof, rt_dict):
+                    if isinstance(d, dict):
+                        slots = d.setdefault("emotion_slots", default_emotion_slots())
+                        if active_em < len(slots):
+                            slots[active_em].setdefault("images", {}).pop(role_id, None)
+                            slots[active_em].setdefault("images_rel", {}).pop(role_id, None)
+        else:
+            target_dict[key] = ""
+            for p_key, pref, rt_dict in (
+                ("player1", "a1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                ("player2", "a2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+            ):
+                prof = self.profiles.get(p_key, {}).get(curr_name)
+                for d in (prof, rt_dict):
+                    if isinstance(d, dict):
+                        d[f"{pref}_{role_id}"] = ""
+        self._rebuild_workshop_sprite_slots(target_dict, "a1" if is_p1 else "a2")
         self._save_character_folder_meta(curr_name)
         self.save_profiles_to_disk()
         self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
@@ -1039,13 +1068,17 @@ class WorkshopMixin:
             role = key.split("_", 1)[1] if "_" in key else key  # ej. 'idle', 'talk', 'scream'
 
             char_folder = self._get_character_folder(curr_name)
+            active_em = self._get_active_emotion_idx(target_dict)
+            is_em_slot = (active_em > 0) and (role in BASE_POSE_ROLES) and (key == f"{'a1' if is_p1 else 'a2'}_{role}")
+            dest_dir = os.path.join(char_folder, "emotions", f"slot_{active_em + 1}") if is_em_slot else char_folder
+            os.makedirs(dest_dir, exist_ok=True)
             ext = os.path.splitext(file_path)[1].lower()
             save_ext = ext if ext in (".gif", ".webp", ".png") else ".png"
-            dest_path = os.path.join(char_folder, f"{role}{save_ext}")
+            dest_path = os.path.join(dest_dir, f"{role}{save_ext}")
 
             # Limpiar versiones anteriores de esta expresión con distinta extensión dentro de la carpeta
             for old_ext in (".png", ".gif", ".webp"):
-                old_candidate = os.path.join(char_folder, f"{role}{old_ext}")
+                old_candidate = os.path.join(dest_dir, f"{role}{old_ext}")
                 if old_ext != save_ext and os.path.exists(old_candidate):
                     try:
                         os.remove(old_candidate)
@@ -1063,23 +1096,38 @@ class WorkshopMixin:
                 dest_path = file_path
 
             log_debug(f"[CARPETA] 🖼️ Guardada expresión '{os.path.basename(dest_path)}' en carpeta de '{curr_name}'")
-            target_dict[key] = dest_path
-            if hasattr(self, f"{key}_path_var"):
-                getattr(self, f"{key}_path_var").set(self._get_expression_display_label(dest_path))
-            self._update_thumbnail(key)
+            if is_em_slot:
+                rel_p = os.path.relpath(dest_path, char_folder).replace("\\", "/")
+                for p_key, rt_d in (
+                    ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                    ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+                ):
+                    prof_d = self.profiles.get(p_key, {}).get(curr_name)
+                    for d_obj in (prof_d, rt_d):
+                        if isinstance(d_obj, dict):
+                            slots = d_obj.setdefault("emotion_slots", default_emotion_slots())
+                            if active_em < len(slots):
+                                slots[active_em].setdefault("images", {})[role] = dest_path
+                                slots[active_em].setdefault("images_rel", {})[role] = rel_p
+                self._rebuild_workshop_sprite_slots(target_dict, "a1" if is_p1 else "a2")
+            else:
+                target_dict[key] = dest_path
+                if hasattr(self, f"{key}_path_var"):
+                    getattr(self, f"{key}_path_var").set(self._get_expression_display_label(dest_path))
+                self._update_thumbnail(key)
 
-            # Sincronizar esta expresión en ambos perfiles (1P y 2P) para esta misma carpeta de personaje
-            for p_key, pref_k, rt_d in (
-                ("player1", "a1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
-                ("player2", "a2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
-            ):
-                prof_d = self.profiles.get(p_key, {}).get(curr_name)
-                for d_obj in (prof_d, rt_d):
-                    if isinstance(d_obj, dict):
-                        d_obj[f"{pref_k}_{role}"] = dest_path
-                        for ex_it in d_obj.get("extra_expressions", []) or []:
-                            if ex_it.get("role") == role:
-                                ex_it["file"] = dest_path
+                # Sincronizar esta expresión en ambos perfiles (1P y 2P) para esta misma carpeta de personaje
+                for p_key, pref_k, rt_d in (
+                    ("player1", "a1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                    ("player2", "a2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+                ):
+                    prof_d = self.profiles.get(p_key, {}).get(curr_name)
+                    for d_obj in (prof_d, rt_d):
+                        if isinstance(d_obj, dict):
+                            d_obj[f"{pref_k}_{role}"] = dest_path
+                            for ex_it in d_obj.get("extra_expressions", []) or []:
+                                if ex_it.get("role") == role:
+                                    ex_it["file"] = dest_path
 
             if is_p1:
                 self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
@@ -1106,7 +1154,16 @@ class WorkshopMixin:
         if not entry:
             return
         lbl, target_dict = entry
-        path = target_dict.get(key)
+        pref = "a1" if (target_dict is self.p1_data) else "a2"
+        role = key.split("_", 1)[1] if key.startswith(f"{pref}_") else ""
+        active_em = self._get_active_emotion_idx(target_dict)
+        path = None
+        if active_em > 0 and role in BASE_POSE_ROLES:
+            slot_obj = self._get_emotion_slot_obj(target_dict, active_em)
+            if slot_obj:
+                path = (slot_obj.get("images") or {}).get(role)
+        if not path:
+            path = target_dict.get(key)
         if hasattr(self, f"{key}_path_var"):
             getattr(self, f"{key}_path_var").set(self._get_expression_display_label(path))
         if lbl and path and os.path.exists(path):
@@ -2442,16 +2499,15 @@ class WorkshopMixin:
     # --- BOCA INDEPENDIENTE CON LIPSYNC (ESTILO HONK) ---
     # =========================================================================
     def _update_mouth_switch_style(self, enabled):
-        if hasattr(self, "w_indep_mouth_check"):
-            if enabled:
-                self.w_indep_mouth_check.config(bg="#DCFCE7", fg="#166534", activebackground="#BBF7D0")
-            else:
-                self.w_indep_mouth_check.config(bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0")
         if hasattr(self, "w_mouth_cfg_btn"):
-            self.w_mouth_cfg_btn.config(
-                bg="#E0F2FE" if enabled else "#F1F5F9",
-                fg="#0369A1" if enabled else "#64748B",
-            )
+            if enabled:
+                self.w_mouth_cfg_btn.config(
+                    text="👄 Boca ✓", bg="#DCFCE7", fg="#166534", activebackground="#BBF7D0"
+                )
+            else:
+                self.w_mouth_cfg_btn.config(
+                    text="👄 Boca", bg="#F1F5F9", fg="#334155", activebackground="#E2E8F0"
+                )
 
     def _apply_independent_mouth_to_character(self, char_name, mouth_cfg):
         folder_path = self._get_character_folder(char_name)
@@ -2501,14 +2557,8 @@ class WorkshopMixin:
         flip_x = bool(target_dict.get("flip_x", False))
 
         mouth_cfg = normalize_independent_mouth(target_dict.get("independent_mouth"), folder_path=folder_path)
-        if not mouth_cfg.get("enabled"):
-            mouth_cfg["enabled"] = True
-            if hasattr(self, "w_indep_mouth_var"):
-                self.w_indep_mouth_var.set(True)
-            self._update_mouth_switch_style(True)
 
-        # Lista de frames disponibles para ajustar posición de boca por pose
-        frames_meta = [("idle", "Base (Quieto)")]
+        frames_meta = [("idle", "Base / Quieto")]
         if target_dict.get("image_mode") == "4_states":
             frames_meta.append(("idle_blink", "Pestañeo"))
         if target_dict.get(f"{prefix}_scream") and os.path.exists(str(target_dict.get(f"{prefix}_scream", ""))):
@@ -2523,9 +2573,9 @@ class WorkshopMixin:
                 frames_meta.append((r_id, short_t))
 
         dlg = tk.Toplevel(self.root)
-        dlg.title(f"👄 Boca Independiente (Lipsync) — {curr_name}")
-        dlg.geometry("860x600")
-        dlg.minsize(780, 540)
+        dlg.title(f"👄 Estudio de Boca (Estilo Mii) — {curr_name}")
+        dlg.geometry("940x670")
+        dlg.minsize(840, 600)
         dlg.configure(bg="#DFE5EE")
         dlg.transient(self.root)
         dlg.grab_set()
@@ -2533,23 +2583,32 @@ class WorkshopMixin:
         main_f = tk.Frame(dlg, bg="#DFE5EE", padx=12, pady=10)
         main_f.pack(fill=tk.BOTH, expand=True)
 
-        # --- COLUMNA IZQUIERDA: VISTA PREVIA INTERACTIVA ---
-        left_col = tk.Frame(main_f, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=10, pady=10)
-        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 8))
-
+        # Cabecera
+        hdr = tk.Frame(main_f, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=8)
+        hdr.pack(fill=tk.X, pady=(0, 8))
         tk.Label(
-            left_col, text="🖱️ ARRASTRA LA BOCA SOBRE EL PERSONAJE",
-            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#1E293B"
-        ).pack(anchor=tk.W, pady=(0, 4))
+            hdr, text=f"👄 Estudio de Boca (Lipsync) — {curr_name}",
+            font=("Segoe UI", 11, "bold"), bg="#FFFFFF", fg="#0F172A"
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            hdr, text="Arrastra la boca o usa la cruceta; clic en una tarjeta para probarla",
+            font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B"
+        ).pack(side=tk.LEFT, padx=(12, 0))
+
+        body = tk.Frame(main_f, bg="#DFE5EE")
+        body.pack(fill=tk.BOTH, expand=True)
+
+        # =====================================================================
+        # COLUMNA IZQUIERDA: VISTA PREVIA + CONTROLES MII + PRUEBA DE APERTURA
+        # =====================================================================
+        left_col = tk.Frame(body, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=10)
+        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 8))
 
         frame_tabs_f = tk.Frame(left_col, bg="#FFFFFF")
         frame_tabs_f.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(
-            frame_tabs_f, text="Frame:", font=("Segoe UI", 8, "bold"),
-            bg="#FFFFFF", fg="#334155"
-        ).pack(side=tk.LEFT, padx=(0, 6))
-        frame_combo = ttk.Combobox(frame_tabs_f, state="readonly", width=28)
-        frame_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(frame_tabs_f, text="Escena / Pose:", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A").pack(side=tk.LEFT)
+        frame_combo = ttk.Combobox(frame_tabs_f, state="readonly", width=24)
+        frame_combo.pack(side=tk.RIGHT)
 
         prev_size = 310
         preview_canvas = tk.Canvas(
@@ -2557,46 +2616,6 @@ class WorkshopMixin:
             highlightthickness=2, highlightbackground="#94A3B8", cursor="fleur"
         )
         preview_canvas.pack(pady=(0, 6))
-
-        # Barra de prueba de lipsync en vivo
-        test_f = tk.Frame(left_col, bg="#F1F5F9", padx=8, pady=6, relief="solid", bd=1)
-        test_f.pack(fill=tk.X)
-
-        test_hdr = tk.Frame(test_f, bg="#F1F5F9")
-        test_hdr.pack(fill=tk.X)
-        tk.Label(
-            test_hdr, text="🎚️ Probar apertura (Lipsync):",
-            font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0F172A"
-        ).pack(side=tk.LEFT)
-        test_slot_lbl = tk.Label(
-            test_hdr, text="Cerrada", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#3671C6"
-        )
-        test_slot_lbl.pack(side=tk.RIGHT)
-
-        test_lvl_var = tk.DoubleVar(value=0.0)
-        test_scale = ttk.Scale(test_f, from_=0.0, to=100.0, variable=test_lvl_var)
-        test_scale.pack(fill=tk.X, pady=(2, 0))
-
-        # --- COLUMNA DERECHA: CONTROLES Y SPRITES ---
-        right_col = tk.Frame(main_f, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=10)
-        right_col.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-        right_scroll = ScrollableFrame(right_col, bg="#FFFFFF")
-        right_scroll.pack(fill=tk.BOTH, expand=True)
-        rc = right_scroll.content
-
-        # Sección 1: Ajuste del frame seleccionado
-        pos_box = tk.LabelFrame(
-            rc, text=" 📍 Posición de Boca (Frame seleccionado) ",
-            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#1E293B", padx=10, pady=8
-        )
-        pos_box.pack(fill=tk.X, pady=(0, 8))
-
-        frame_status_lbl = tk.Label(
-            pos_box, text="Editando: Base (Quieto)", font=("Segoe UI", 8, "bold"),
-            bg="#E0F2FE", fg="#0369A1", padx=6, pady=2, anchor=tk.W
-        )
-        frame_status_lbl.pack(fill=tk.X, pady=(0, 6))
 
         ox_var = tk.IntVar(value=mouth_cfg["offset_x"])
         oy_var = tk.IntVar(value=mouth_cfg["offset_y"])
@@ -2609,19 +2628,24 @@ class WorkshopMixin:
         state = {
             "role": "idle",
             "body_cache": {},
+            "thumb_cache": {},
             "mouth_cache": MouthRenderCache(),
             "engine": MouthLipsyncEngine(),
             "drag_active": False,
             "drag_start_xy": (0, 0),
             "drag_orig_off": (0, 0),
-            "tab_btns": {},
-            "slot_widgets": {},
             "updating_vars": False,
+            "adv_open": False,
+            "preview_vowel": None,
         }
         state["mouth_cache"].load_pil_frames(mouth_cfg, flip_x=flip_x)
 
         def save_and_sync():
             self._apply_independent_mouth_to_character(curr_name, mouth_cfg)
+            if hasattr(self, "w_indep_mouth_var"):
+                on = bool(mouth_cfg.get("enabled", False))
+                self.w_indep_mouth_var.set(on)
+                self._update_mouth_switch_style(on)
 
         def get_body_photo(role_k):
             if role_k in state["body_cache"]:
@@ -2645,16 +2669,437 @@ class WorkshopMixin:
             except Exception:
                 return None
 
+        # Cruceta Mii + Tamaño + Giro
+        mii_bar = tk.Frame(left_col, bg="#F1F5F9", padx=8, pady=6, relief="solid", bd=1)
+        mii_bar.pack(fill=tk.X, pady=(0, 6))
+
+        dpad_f = tk.Frame(mii_bar, bg="#F1F5F9")
+        dpad_f.pack(side=tk.LEFT)
+
+        def nudge_pos(dx, dy):
+            eff_dx = -dx if flip_x else dx
+            ox_var.set(max(-180, min(180, int(ox_var.get()) + eff_dx)))
+            oy_var.set(max(-180, min(180, int(oy_var.get()) + dy)))
+            commit_position_change()
+
+        def nudge_scale(ds):
+            sc_var.set(max(15, min(250, int(sc_var.get()) + ds)))
+            commit_position_change()
+
+        def nudge_rot(dr):
+            rot_var.set(max(-45, min(45, int(rot_var.get()) + dr)))
+            commit_position_change()
+
+        def center_x():
+            ox_var.set(0)
+            commit_position_change()
+
+        btn_s = {"font": ("Segoe UI", 8, "bold"), "bg": "#FFFFFF", "fg": "#0F172A", "relief": "solid", "bd": 1, "cursor": "hand2", "width": 3}
+        tk.Button(dpad_f, text="▲", command=lambda: nudge_pos(0, -2), **btn_s).grid(row=0, column=1, padx=1, pady=1)
+        tk.Button(dpad_f, text="◀", command=lambda: nudge_pos(-2, 0), **btn_s).grid(row=1, column=0, padx=1, pady=1)
+        tk.Button(dpad_f, text="⊙", command=center_x, **btn_s).grid(row=1, column=1, padx=1, pady=1)
+        tk.Button(dpad_f, text="▶", command=lambda: nudge_pos(2, 0), **btn_s).grid(row=1, column=2, padx=1, pady=1)
+        tk.Button(dpad_f, text="▼", command=lambda: nudge_pos(0, 2), **btn_s).grid(row=2, column=1, padx=1, pady=1)
+
+        sr_f = tk.Frame(mii_bar, bg="#F1F5F9")
+        sr_f.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+
+        sz_row = tk.Frame(sr_f, bg="#F1F5F9")
+        sz_row.pack(fill=tk.X, pady=(2, 6))
+        tk.Label(sz_row, text="Tamaño:", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#334155", width=7, anchor="w").pack(side=tk.LEFT)
+        tk.Button(sz_row, text="➖", command=lambda: nudge_scale(-5), **btn_s).pack(side=tk.LEFT, padx=2)
+        size_val_lbl = tk.Label(sz_row, text=f"{sc_var.get()}%", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0369A1", width=5)
+        size_val_lbl.pack(side=tk.LEFT)
+        tk.Button(sz_row, text="➕", command=lambda: nudge_scale(5), **btn_s).pack(side=tk.LEFT, padx=2)
+
+        rt_row = tk.Frame(sr_f, bg="#F1F5F9")
+        rt_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(rt_row, text="Girar:", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#334155", width=7, anchor="w").pack(side=tk.LEFT)
+        tk.Button(rt_row, text="↺", command=lambda: nudge_rot(-5), **btn_s).pack(side=tk.LEFT, padx=2)
+        rot_val_lbl = tk.Label(rt_row, text=f"{rot_var.get()}°", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0369A1", width=5)
+        rot_val_lbl.pack(side=tk.LEFT)
+        tk.Button(rt_row, text="↻", command=lambda: nudge_rot(5), **btn_s).pack(side=tk.LEFT, padx=2)
+        tk.Button(rt_row, text="0°", font=("Segoe UI", 7, "bold"), bg="#E2E8F0", fg="#334155", relief="solid", bd=1, cursor="hand2", padx=4, command=lambda: (rot_var.set(0), commit_position_change())).pack(side=tk.LEFT, padx=(4, 0))
+
+        # Barra de prueba de lipsync en vivo
+        test_f = tk.Frame(left_col, bg="#F1F5F9", padx=8, pady=5, relief="solid", bd=1)
+        test_f.pack(fill=tk.X)
+        test_hdr = tk.Frame(test_f, bg="#F1F5F9")
+        test_hdr.pack(fill=tk.X)
+        tk.Label(test_hdr, text="🎚️ Probar apertura (Lipsync):", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0F172A").pack(side=tk.LEFT)
+        test_slot_lbl = tk.Label(test_hdr, text="Cerrada", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#3671C6")
+        test_slot_lbl.pack(side=tk.RIGHT)
+        test_lvl_var = tk.DoubleVar(value=0.0)
+        test_scale = ttk.Scale(test_f, from_=0.0, to=100.0, variable=test_lvl_var)
+        test_scale.pack(fill=tk.X, pady=(2, 0))
+
+        # =====================================================================
+        # COLUMNA DERECHA: MODO EN ESCENA + 4 TARJETAS EN FILA + AVANZADO
+        # =====================================================================
+        right_scroll = ScrollableFrame(body, bg="#FFFFFF")
+        right_scroll.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        rc = right_scroll.content
+
+        # --- SECCIÓN 1: MODO EN ESTA ESCENA (SIN CHECKBOX PREVIO) ---
+        mode_box = tk.LabelFrame(
+            rc, text=" 1. Boca en esta escena ",
+            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8
+        )
+        mode_box.pack(fill=tk.X, padx=8, pady=(6, 8))
+
+        scene_info_lbl = tk.Label(
+            mode_box, text="Escena actual: Base / Quieto",
+            font=("Segoe UI", 8, "bold"), bg="#E0F2FE", fg="#0369A1", padx=6, pady=2, anchor="w"
+        )
+        scene_info_lbl.pack(fill=tk.X, pady=(0, 6))
+
+        mode_cards_f = tk.Frame(mode_box, bg="#FFFFFF")
+        mode_cards_f.pack(fill=tk.X)
+
+        def set_mouth_scene_mode(use_modular):
+            r = state["role"]
+            if r == "idle":
+                mouth_cfg["enabled"] = bool(use_modular)
+            else:
+                if use_modular:
+                    mouth_cfg["enabled"] = True
+                ov = mouth_cfg.setdefault("frame_overrides", {})
+                cur = ov.get(r, {"offset_x": mouth_cfg["offset_x"], "offset_y": mouth_cfg["offset_y"], "scale": mouth_cfg["scale"], "rotation": mouth_cfg["rotation"]})
+                cur["hidden"] = not bool(use_modular)
+                ov[r] = cur
+                hidden_var.set(not bool(use_modular))
+            refresh_mode_cards()
+            refresh_tab_styles()
+            render_preview()
+            save_and_sync()
+
+        def refresh_mode_cards():
+            for w in mode_cards_f.winfo_children():
+                w.destroy()
+            r = state["role"]
+            if r == "idle":
+                is_mod = bool(mouth_cfg.get("enabled", False))
+            else:
+                hid, *_ = resolve_mouth_frame_config(mouth_cfg, r)
+                is_mod = bool(mouth_cfg.get("enabled", False)) and (not hid)
+
+            for mod_val, ico_t, title_t in ((False, "🚫", "Dibujo del PNG"), (True, "👄", "Boca Animada (Lipsync)")):
+                is_sel = (is_mod == mod_val)
+                c = tk.Frame(
+                    mode_cards_f,
+                    bg="#DBEAFE" if is_sel else "#F8FAFC",
+                    highlightthickness=2 if is_sel else 1,
+                    highlightbackground="#2563EB" if is_sel else "#CBD5E1",
+                    padx=10, pady=6, cursor="hand2"
+                )
+                c.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=3)
+                l1 = tk.Label(c, text=f"{ico_t} {title_t}", font=("Segoe UI", 8, "bold"), bg=c["bg"], fg="#1E3A8A" if is_sel else "#334155")
+                l1.pack()
+                for w in (c, l1):
+                    w.bind("<Button-1>", lambda _e, m=mod_val: set_mouth_scene_mode(m))
+
+        # --- SECCIÓN 2: LAS 4 BOCAS EN FILA HORIZONTAL (TARJETAS VISUALES) ---
+        slots_box = tk.LabelFrame(
+            rc, text=" 2. Formas de Boca (Clic para previsualizar o cargar) ",
+            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8
+        )
+        slots_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        ls_mode_f = tk.Frame(slots_box, bg="#FFFFFF")
+        ls_mode_f.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(ls_mode_f, text="Modo Lipsync:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
+        ls_mode_btns = {}
+
+        def set_lipsync_mode(m_val):
+            mouth_cfg["mode"] = m_val
+            state["preview_vowel"] = None
+            refresh_ls_mode_btns()
+            refresh_slot_cards()
+            render_preview()
+            save_and_sync()
+
+        def refresh_ls_mode_btns():
+            cur_m = mouth_cfg.get("mode", "volume")
+            for mk, mb in ls_mode_btns.items():
+                if mk == cur_m:
+                    mb.config(bg="#0284C7", fg="#FFFFFF", activebackground="#0369A1", activeforeground="#FFFFFF")
+                else:
+                    mb.config(bg="#F1F5F9", fg="#334155", activebackground="#E2E8F0", activeforeground="#0F172A")
+
+        for mk, mlbl in (("volume", "🔊 Modo A: Volumen"), ("vowels", "🗣️ Modo B: Vocales FFT (A/E/I/O/U)")):
+            b = tk.Button(
+                ls_mode_f, text=mlbl, font=("Segoe UI", 8, "bold"),
+                relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+                command=lambda k=mk: set_lipsync_mode(k)
+            )
+            b.pack(side=tk.LEFT, padx=(0, 4))
+            ls_mode_btns[mk] = b
+
+        slots_grid = tk.Frame(slots_box, bg="#FFFFFF")
+        slots_grid.pack(fill=tk.X)
+
+        vowels_hdr = tk.Label(
+            slots_box, text="Vocales Modo B (opcional: si falta alguna, usa tus 4 bocas base):",
+            font=("Segoe UI", 7, "bold"), bg="#FFFFFF", fg="#0369A1", anchor="w"
+        )
+        vowels_grid = tk.Frame(slots_box, bg="#FFFFFF")
+
+        slot_test_levels = {
+            "closed": 0.0, "half": 35.0, "open": 65.0, "wide": 95.0,
+            "vowel_a": 65.0, "vowel_e": 55.0, "vowel_i": 50.0, "vowel_o": 75.0, "vowel_u": 45.0,
+        }
+
+        def pick_mouth_sprite(slot_k):
+            fp = filedialog.askopenfilename(
+                parent=dlg,
+                title=f"Seleccionar boca: {MOUTH_SLOT_LABELS[slot_k]}",
+                filetypes=[("Imágenes", "*.png *.gif *.webp"), ("Todos", "*.*")]
+            )
+            if not fp:
+                return
+            mouths_dir = os.path.join(folder_path, "mouths")
+            os.makedirs(mouths_dir, exist_ok=True)
+            ext = os.path.splitext(fp)[1].lower()
+            if ext not in (".png", ".gif", ".webp"):
+                ext = ".png"
+            dest = os.path.join(mouths_dir, f"{slot_k}{ext}")
+            try:
+                if os.path.abspath(fp) != os.path.abspath(dest):
+                    shutil.copy2(fp, dest)
+                mouth_cfg.setdefault("sprites", {})[slot_k] = dest
+                mouth_cfg.setdefault("sprites_rel", {})[slot_k] = f"mouths/{slot_k}{ext}"
+                mouth_cfg["enabled"] = True
+                state["thumb_cache"].pop(slot_k, None)
+                state["mouth_cache"].load_pil_frames(mouth_cfg, flip_x=flip_x)
+                test_lvl_var.set(slot_test_levels.get(slot_k, 0.0))
+                refresh_mode_cards()
+                refresh_slot_cards()
+                render_preview()
+                save_and_sync()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo copiar la imagen:\n{e}", parent=dlg)
+
+        def clear_mouth_sprite(slot_k):
+            mouth_cfg.setdefault("sprites", {})[slot_k] = ""
+            mouth_cfg.setdefault("sprites_rel", {})[slot_k] = ""
+            state["thumb_cache"].pop(slot_k, None)
+            state["mouth_cache"].load_pil_frames(mouth_cfg, flip_x=flip_x)
+            refresh_slot_cards()
+            render_preview()
+            save_and_sync()
+
+        def preview_slot(slot_k):
+            p = (mouth_cfg.get("sprites") or {}).get(slot_k, "")
+            if not p or not os.path.exists(str(p)):
+                pick_mouth_sprite(slot_k)
+                return
+            mouth_cfg["enabled"] = True
+            state["preview_vowel"] = slot_k if slot_k in VOWEL_SLOTS else None
+            test_lvl_var.set(slot_test_levels.get(slot_k, 0.0))
+            refresh_mode_cards()
+            render_preview()
+            save_and_sync()
+
+        def render_cards_into(grid_parent, slot_list):
+            for w in grid_parent.winfo_children():
+                w.destroy()
+            for col_i, s in enumerate(slot_list):
+                p = (mouth_cfg.get("sprites") or {}).get(s, "")
+                has_img = bool(p and os.path.exists(str(p)))
+                card = tk.Frame(
+                    grid_parent,
+                    bg="#F8FAFC" if has_img else "#F1F5F9",
+                    highlightthickness=1,
+                    highlightbackground="#94A3B8" if has_img else "#CBD5E1",
+                    padx=5, pady=5
+                )
+                card.grid(row=0, column=col_i, padx=2, pady=2, sticky="nsew")
+
+                lbl_name = MOUTH_SLOT_LABELS[s].split("(")[0].strip()
+                t_lbl = tk.Label(card, text=lbl_name, font=("Segoe UI", 8, "bold"), bg=card["bg"], fg="#0F172A", cursor="hand2")
+                t_lbl.pack()
+
+                if has_img:
+                    th = state["thumb_cache"].get(s)
+                    if th is None:
+                        try:
+                            im = Image.open(p).convert("RGBA")
+                            im.thumbnail((42, 42), Image.Resampling.LANCZOS)
+                            th = ImageTk.PhotoImage(im)
+                            state["thumb_cache"][s] = th
+                        except Exception:
+                            th = None
+                    if th is not None:
+                        ico = tk.Label(card, image=th, bg=card["bg"], width=44, height=44, cursor="hand2")
+                        ico._th = th
+                        ico.pack(pady=3)
+                    else:
+                        ico = tk.Label(card, text="👄", font=("Segoe UI", 14), bg=card["bg"], cursor="hand2")
+                        ico.pack(pady=3)
+                else:
+                    ico = tk.Label(card, text="➕", font=("Segoe UI", 14), bg=card["bg"], fg="#64748B", width=4, height=2, cursor="hand2")
+                    ico.pack(pady=3)
+
+                for w in (card, t_lbl, ico):
+                    w.bind("<Button-1>", lambda _e, sk=s: preview_slot(sk))
+
+                b_row = tk.Frame(card, bg=card["bg"])
+                b_row.pack(fill=tk.X, pady=(2, 0))
+                tk.Button(
+                    b_row, text="📂", font=("Segoe UI", 7), bg="#E0F2FE", fg="#0369A1",
+                    relief="solid", bd=1, padx=4, cursor="hand2",
+                    command=lambda sk=s: pick_mouth_sprite(sk)
+                ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0, 2))
+                tk.Button(
+                    b_row, text="✕", font=("Segoe UI", 7), bg="#FEE2E2", fg="#B91C1C",
+                    relief="solid", bd=1, padx=4, cursor="hand2",
+                    command=lambda sk=s: clear_mouth_sprite(sk)
+                ).pack(side=tk.RIGHT)
+
+            for c in range(len(slot_list)):
+                grid_parent.columnconfigure(c, weight=1)
+
+        def refresh_slot_cards():
+            refresh_ls_mode_btns()
+            render_cards_into(slots_grid, MOUTH_SLOTS)
+            if mouth_cfg.get("mode", "volume") == "vowels":
+                vowels_hdr.pack(fill=tk.X, pady=(6, 2), before=el_f)
+                vowels_grid.pack(fill=tk.X, before=el_f)
+                render_cards_into(vowels_grid, VOWEL_SLOTS)
+            else:
+                vowels_hdr.pack_forget()
+                vowels_grid.pack_forget()
+
+        # Presets rápidos de elasticidad
+        el_f = tk.Frame(slots_box, bg="#FFFFFF")
+        el_f.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(el_f, text="Elasticidad:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
+
+        def apply_squash_preset(val):
+            squash_var.set(val)
+            mouth_cfg["squash_strength"] = val
+            save_and_sync()
+
+        for lbl, val in (("Rígida", 0), ("Normal", 100), ("Elástica", 160)):
+            tk.Button(
+                el_f, text=lbl, font=("Segoe UI", 8, "bold"),
+                bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=1, cursor="hand2",
+                command=lambda v=val: apply_squash_preset(v)
+            ).pack(side=tk.LEFT, padx=2)
+
+        # --- SECCIÓN 3: ACORDEÓN AVANZADO ---
+        adv_hdr = tk.Frame(rc, bg="#FFFFFF")
+        adv_hdr.pack(fill=tk.X, padx=8, pady=(0, 4))
+        adv_box = tk.LabelFrame(rc, text=" Ajustes finos y físicas ", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569", padx=10, pady=8)
+
+        def toggle_adv():
+            state["adv_open"] = not state["adv_open"]
+            if state["adv_open"]:
+                adv_btn.config(text="▼ Ocultar Avanzado (Físicas y Opciones)")
+                adv_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+            else:
+                adv_btn.config(text="▶ Avanzado (Físicas y Opciones)")
+                adv_box.pack_forget()
+
+        adv_btn = tk.Button(
+            adv_hdr, text="▶ Avanzado (Físicas y Opciones)", font=("Segoe UI", 8, "bold"),
+            bg="#F1F5F9", fg="#475569", relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
+            anchor="w", command=toggle_adv
+        )
+        adv_btn.pack(fill=tk.X)
+
+        def commit_position_change(*_args):
+            if state["updating_vars"]:
+                return
+            rk = state["role"]
+            ox = int(ox_var.get())
+            oy = int(oy_var.get())
+            sc = int(sc_var.get())
+            rot = int(rot_var.get())
+            size_val_lbl.config(text=f"{sc}%")
+            rot_val_lbl.config(text=f"{rot}°")
+            if rk == "idle":
+                mouth_cfg["offset_x"] = ox
+                mouth_cfg["offset_y"] = oy
+                mouth_cfg["scale"] = sc
+                mouth_cfg["rotation"] = rot
+            else:
+                mouth_cfg.setdefault("frame_overrides", {})[rk] = {
+                    "offset_x": ox,
+                    "offset_y": oy,
+                    "scale": sc,
+                    "rotation": rot,
+                    "hidden": bool(hidden_var.get()),
+                }
+            refresh_tab_styles()
+            render_preview()
+            save_and_sync()
+
+        def make_slider_row(parent, label, var, from_v, to_v):
+            row = tk.Frame(parent, bg="#FFFFFF")
+            row.pack(fill=tk.X, pady=2)
+            tk.Label(row, text=label, width=14, anchor=tk.W, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+            val_lbl = tk.Label(row, text=str(var.get()), width=5, anchor=tk.E, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#3671C6")
+            val_lbl.pack(side=tk.RIGHT)
+            sc = ttk.Scale(
+                row, from_=from_v, to=to_v, variable=var,
+                command=lambda v: (var.set(int(round(float(v)))), val_lbl.config(text=str(var.get())), commit_position_change())
+            )
+            sc.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+            var.trace_add("write", lambda *_: val_lbl.config(text=str(var.get())))
+
+        make_slider_row(adv_box, "Posición X:", ox_var, -180, 180)
+        make_slider_row(adv_box, "Posición Y:", oy_var, -180, 180)
+        make_slider_row(adv_box, "Escala (%):", sc_var, 15, 250)
+        make_slider_row(adv_box, "Rotación (°):", rot_var, -45, 45)
+
+        sq_row = tk.Frame(adv_box, bg="#FFFFFF")
+        sq_row.pack(fill=tk.X, pady=2)
+        tk.Label(sq_row, text="Squash Honk:", width=14, anchor=tk.W, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+        sq_lbl = tk.Label(sq_row, text=f"{squash_var.get()}%", width=5, anchor=tk.E, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#3671C6")
+        sq_lbl.pack(side=tk.RIGHT)
+        ttk.Scale(
+            sq_row, from_=0, to=200, variable=squash_var,
+            command=lambda v: (
+                squash_var.set(int(round(float(v)))),
+                sq_lbl.config(text=f"{squash_var.get()}%"),
+                mouth_cfg.__setitem__("squash_strength", int(squash_var.get())),
+                save_and_sync(),
+            )
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+
+        tk.Checkbutton(
+            adv_box, text="Seguir rebote / sacudida del cuerpo",
+            variable=bounce_var,
+            command=lambda: (mouth_cfg.__setitem__("follows_bounce", bool(bounce_var.get())), save_and_sync()),
+            bg="#FFFFFF", fg="#1E293B", selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(anchor=tk.W, pady=(4, 2))
+
+        def reset_current_override():
+            rk = state["role"]
+            if rk == "idle":
+                mouth_cfg["offset_x"] = 0
+                mouth_cfg["offset_y"] = 0
+                mouth_cfg["scale"] = 100
+                mouth_cfg["rotation"] = 0
+            else:
+                (mouth_cfg.get("frame_overrides") or {}).pop(rk, None)
+            load_controls_for_role(rk)
+            save_and_sync()
+
+        tk.Button(
+            adv_box, text="⟲ Restablecer posición de esta escena", font=("Segoe UI", 8),
+            bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
+            command=reset_current_override
+        ).pack(anchor=tk.E, pady=(4, 0))
+
+        # =====================================================================
+        # RENDERIZADO Y SINCRONIZACIÓN
+        # =====================================================================
         def render_preview():
             preview_canvas.delete("all")
             cx, cy = prev_size // 2, prev_size // 2
             pos_scale = max(20, prev_size - 16) / 384.0
-
-            # Cuadrícula suave
-            for gx in range(0, prev_size, 32):
-                preview_canvas.create_line(gx, 0, gx, prev_size, fill="#EEF2F7")
-            for gy in range(0, prev_size, 32):
-                preview_canvas.create_line(0, gy, prev_size, gy, fill="#EEF2F7")
 
             b_ph = get_body_photo(state["role"])
             if b_ph is not None:
@@ -2662,18 +3107,26 @@ class WorkshopMixin:
                 preview_canvas._b_ph = b_ph
 
             hidden, ox, oy, sc_pct, rot_deg, ov_key = resolve_mouth_frame_config(mouth_cfg, state["role"])
+            if state["role"] == "idle" and not mouth_cfg.get("enabled", False):
+                hidden = True
+
             if hidden:
                 preview_canvas.create_text(
-                    cx, prev_size - 14, text="🚫 Boca oculta en este frame",
-                    font=("Segoe UI", 8, "bold"), fill="#DC2626"
+                    cx, prev_size - 14, text="🚫 Usando boca dibujada en el PNG",
+                    font=("Segoe UI", 8, "bold"), fill="#64748B"
                 )
                 return
+
+            if ox == 0:
+                preview_canvas.create_line(cx, 8, cx, prev_size - 8, fill="#38BDF8", dash=(4, 4), width=1)
 
             lvl = float(test_lvl_var.get())
             avail = state["mouth_cache"].pil_frames.keys()
             slot, sq_idx = state["engine"].update(
                 lvl, 15.0, lvl >= 15.0, lvl >= 85.0, False, avail,
                 squash_strength=mouth_cfg.get("squash_strength", 100),
+                mode=mouth_cfg.get("mode", "volume"),
+                vowel_hint=state.get("preview_vowel"),
             )
             test_slot_lbl.config(text=MOUTH_SLOT_LABELS.get(slot, slot))
 
@@ -2687,7 +3140,7 @@ class WorkshopMixin:
                 preview_canvas._m_ph = m_ph
             else:
                 preview_canvas.create_text(
-                    cx, cy, text="Elige al menos una imagen de boca\n(ej. Cerrada y Abierta)",
+                    cx, cy, text="Elige una boca en las tarjetas\n(ej. Cerrada y Abierta)",
                     font=("Segoe UI", 9, "bold"), fill="#64748B", justify=tk.CENTER
                 )
 
@@ -2709,6 +3162,8 @@ class WorkshopMixin:
 
         def load_controls_for_role(role_k):
             state["role"] = role_k
+            label_txt = dict(frames_meta).get(role_k, role_k)
+            scene_info_lbl.config(text=f"Escena actual: {label_txt}")
             state["updating_vars"] = True
             hidden, ox, oy, sc_pct, rot_deg, _ = resolve_mouth_frame_config(mouth_cfg, role_k)
             ox_var.set(ox)
@@ -2716,25 +3171,10 @@ class WorkshopMixin:
             sc_var.set(sc_pct)
             rot_var.set(rot_deg)
             hidden_var.set(hidden)
+            size_val_lbl.config(text=f"{sc_pct}%")
+            rot_val_lbl.config(text=f"{rot_deg}°")
             state["updating_vars"] = False
-
-            label_txt = dict(frames_meta).get(role_k, role_k)
-            if role_k == "idle":
-                frame_status_lbl.config(text=f"Editando: {label_txt} (Heredada por todos los frames sin ajuste)", bg="#E0F2FE", fg="#0369A1")
-                hidden_chk.pack_forget()
-                reset_ov_btn.pack_forget()
-            else:
-                is_ov = role_k in (mouth_cfg.get("frame_overrides") or {})
-                frame_status_lbl.config(
-                    text=f"Editando: {label_txt}" + (" (Ajuste propio)" if is_ov else " (Heredando posición Base)"),
-                    bg="#FEF3C7" if is_ov else "#F1F5F9",
-                    fg="#92400E" if is_ov else "#475569",
-                )
-                hidden_chk.pack(anchor=tk.W, pady=(4, 2))
-                if is_ov:
-                    reset_ov_btn.pack(anchor=tk.W, pady=(2, 0))
-                else:
-                    reset_ov_btn.pack_forget()
+            refresh_mode_cards()
             refresh_tab_styles()
             render_preview()
 
@@ -2745,170 +3185,6 @@ class WorkshopMixin:
 
         frame_combo.bind("<<ComboboxSelected>>", on_frame_combo_selected)
 
-        def commit_position_change(*_args):
-            if state["updating_vars"]:
-                return
-            rk = state["role"]
-            ox = int(ox_var.get())
-            oy = int(oy_var.get())
-            sc = int(sc_var.get())
-            rot = int(rot_var.get())
-            if rk == "idle":
-                mouth_cfg["offset_x"] = ox
-                mouth_cfg["offset_y"] = oy
-                mouth_cfg["scale"] = sc
-                mouth_cfg["rotation"] = rot
-            else:
-                mouth_cfg.setdefault("frame_overrides", {})[rk] = {
-                    "offset_x": ox,
-                    "offset_y": oy,
-                    "scale": sc,
-                    "rotation": rot,
-                    "hidden": bool(hidden_var.get()),
-                }
-            refresh_tab_styles()
-            render_preview()
-            save_and_sync()
-
-        def reset_current_override():
-            rk = state["role"]
-            if rk != "idle" and rk in (mouth_cfg.get("frame_overrides") or {}):
-                mouth_cfg["frame_overrides"].pop(rk, None)
-                load_controls_for_role(rk)
-                save_and_sync()
-
-        def make_slider_row(parent, label, var, from_v, to_v):
-            row = tk.Frame(parent, bg="#FFFFFF")
-            row.pack(fill=tk.X, pady=2)
-            tk.Label(row, text=label, width=12, anchor=tk.W, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
-            val_lbl = tk.Label(row, text=str(var.get()), width=5, anchor=tk.E, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#3671C6")
-            val_lbl.pack(side=tk.RIGHT)
-            sc = ttk.Scale(
-                row, from_=from_v, to=to_v, variable=var,
-                command=lambda v: (var.set(int(round(float(v)))), val_lbl.config(text=str(var.get())), commit_position_change())
-            )
-            sc.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-            var.trace_add("write", lambda *_: val_lbl.config(text=str(var.get())))
-
-        make_slider_row(pos_box, "Posición X:", ox_var, -180, 180)
-        make_slider_row(pos_box, "Posición Y:", oy_var, -180, 180)
-        make_slider_row(pos_box, "Escala (%):", sc_var, 15, 250)
-        make_slider_row(pos_box, "Rotación (°):", rot_var, -45, 45)
-
-        hidden_chk = tk.Checkbutton(
-            pos_box, text="Ocultar boca en este frame (ya trae boca dibujada)",
-            variable=hidden_var, command=commit_position_change,
-            bg="#FFFFFF", fg="#B91C1C", selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2"
-        )
-        reset_ov_btn = tk.Button(
-            pos_box, text="↩️ Usar posición Base en este frame", font=("Segoe UI", 8, "bold"),
-            bg="#F1F5F9", fg="#1E293B", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
-            command=reset_current_override
-        )
-
-        # Opciones de animación
-        anim_box = tk.LabelFrame(
-            rc, text=" ✨ Animación Lipsync ",
-            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#1E293B", padx=10, pady=6
-        )
-        anim_box.pack(fill=tk.X, pady=(0, 8))
-
-        tk.Checkbutton(
-            anim_box, text="Seguir rebote / sacudida del cuerpo",
-            variable=bounce_var,
-            command=lambda: (mouth_cfg.__setitem__("follows_bounce", bool(bounce_var.get())), save_and_sync()),
-            bg="#FFFFFF", fg="#1E293B", selectcolor="#FFFFFF", font=("Segoe UI", 8, "bold"), cursor="hand2"
-        ).pack(anchor=tk.W)
-
-        sq_row = tk.Frame(anim_box, bg="#FFFFFF")
-        sq_row.pack(fill=tk.X, pady=(2, 0))
-        tk.Label(sq_row, text="Squash Honk:", width=12, anchor=tk.W, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
-        sq_lbl = tk.Label(sq_row, text=f"{squash_var.get()}%", width=5, anchor=tk.E, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#3671C6")
-        sq_lbl.pack(side=tk.RIGHT)
-        ttk.Scale(
-            sq_row, from_=0, to=200, variable=squash_var,
-            command=lambda v: (
-                squash_var.set(int(round(float(v)))),
-                sq_lbl.config(text=f"{squash_var.get()}%"),
-                mouth_cfg.__setitem__("squash_strength", int(squash_var.get())),
-                save_and_sync(),
-            )
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        # Sección 2: Imágenes de boca
-        sprites_box = tk.LabelFrame(
-            rc, text=" 👄 Imágenes de Boca (PNG / GIF / WEBP) ",
-            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#1E293B", padx=10, pady=8
-        )
-        sprites_box.pack(fill=tk.X, pady=(0, 8))
-
-        def refresh_slot_labels():
-            for s in MOUTH_SLOTS:
-                lbl_w = state["slot_widgets"].get(s)
-                if lbl_w:
-                    p = (mouth_cfg.get("sprites") or {}).get(s, "")
-                    lbl_w.config(
-                        text=os.path.basename(p) if p else "(Sin asignar)",
-                        fg="#0F172A" if p else "#94A3B8"
-                    )
-
-        def pick_mouth_sprite(slot_k):
-            fp = filedialog.askopenfilename(
-                parent=dlg,
-                title=f"Seleccionar boca: {MOUTH_SLOT_LABELS[slot_k]}",
-                filetypes=[("Imágenes", "*.png *.gif *.webp"), ("Todos", "*.*")]
-            )
-            if not fp:
-                return
-            mouths_dir = os.path.join(folder_path, "mouths")
-            os.makedirs(mouths_dir, exist_ok=True)
-            ext = os.path.splitext(fp)[1].lower()
-            if ext not in (".png", ".gif", ".webp"):
-                ext = ".png"
-            dest = os.path.join(mouths_dir, f"{slot_k}{ext}")
-            try:
-                if os.path.abspath(fp) != os.path.abspath(dest):
-                    shutil.copy2(fp, dest)
-                mouth_cfg.setdefault("sprites", {})[slot_k] = dest
-                mouth_cfg.setdefault("sprites_rel", {})[slot_k] = f"mouths/{slot_k}{ext}"
-                state["mouth_cache"].load_pil_frames(mouth_cfg, flip_x=flip_x)
-                refresh_slot_labels()
-                render_preview()
-                save_and_sync()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo copiar la imagen:\n{e}", parent=dlg)
-
-        def clear_mouth_sprite(slot_k):
-            mouth_cfg.setdefault("sprites", {})[slot_k] = ""
-            mouth_cfg.setdefault("sprites_rel", {})[slot_k] = ""
-            state["mouth_cache"].load_pil_frames(mouth_cfg, flip_x=flip_x)
-            refresh_slot_labels()
-            render_preview()
-            save_and_sync()
-
-        for s in MOUTH_SLOTS:
-            s_row = tk.Frame(sprites_box, bg="#F8FAFC", padx=6, pady=4, relief="solid", bd=1)
-            s_row.pack(fill=tk.X, pady=3)
-            tk.Label(
-                s_row, text=MOUTH_SLOT_LABELS[s], width=15, anchor=tk.W,
-                font=("Segoe UI", 8, "bold"), bg="#F8FAFC", fg="#1E293B"
-            ).pack(side=tk.LEFT)
-            fn_lbl = tk.Label(s_row, text="(Sin asignar)", anchor=tk.W, font=("Segoe UI", 8), bg="#F8FAFC", fg="#94A3B8")
-            fn_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-            state["slot_widgets"][s] = fn_lbl
-
-            tk.Button(
-                s_row, text="✕", font=("Segoe UI", 8, "bold"), bg="#FEE2E2", fg="#B91C1C",
-                relief="solid", bd=1, padx=5, cursor="hand2",
-                command=lambda sk=s: clear_mouth_sprite(sk)
-            ).pack(side=tk.RIGHT, padx=(4, 0))
-            tk.Button(
-                s_row, text="📁 Elegir", font=("Segoe UI", 8, "bold"), bg="#E0F2FE", fg="#0369A1",
-                relief="solid", bd=1, padx=8, cursor="hand2",
-                command=lambda sk=s: pick_mouth_sprite(sk)
-            ).pack(side=tk.RIGHT)
-
-        # Arrastre directo con el mouse sobre el preview
         def on_canvas_down(event):
             state["drag_active"] = True
             state["drag_start_xy"] = (event.x, event.y)
@@ -2924,8 +3200,11 @@ class WorkshopMixin:
             if flip_x:
                 dx_off = -dx_off
             dy_off = int(round(dy_px / max(0.1, pos_scale)))
+            new_ox = max(-180, min(180, state["drag_orig_off"][0] + dx_off))
+            if abs(new_ox) <= 3:
+                new_ox = 0
             state["updating_vars"] = True
-            ox_var.set(max(-180, min(180, state["drag_orig_off"][0] + dx_off)))
+            ox_var.set(new_ox)
             oy_var.set(max(-180, min(180, state["drag_orig_off"][1] + dy_off)))
             state["updating_vars"] = False
             commit_position_change()
@@ -2933,12 +3212,24 @@ class WorkshopMixin:
         def on_canvas_up(_event):
             state["drag_active"] = False
 
+        def on_canvas_wheel(event):
+            num = getattr(event, "num", None)
+            step = 5 if (num == 4 or getattr(event, "delta", 0) > 0) else -5
+            new_sc = max(15, min(250, int(sc_var.get()) + step))
+            if new_sc != sc_var.get():
+                state["updating_vars"] = True
+                sc_var.set(new_sc)
+                state["updating_vars"] = False
+                commit_position_change()
+
         preview_canvas.bind("<ButtonPress-1>", on_canvas_down)
         preview_canvas.bind("<B1-Motion>", on_canvas_move)
         preview_canvas.bind("<ButtonRelease-1>", on_canvas_up)
+        preview_canvas.bind("<MouseWheel>", on_canvas_wheel)
+        preview_canvas.bind("<Button-4>", on_canvas_wheel)
+        preview_canvas.bind("<Button-5>", on_canvas_wheel)
         test_scale.configure(command=lambda _v: render_preview())
 
-        # Botón cerrar
         tk.Button(
             main_f, text="✅ Listo", font=("Segoe UI", 9, "bold"),
             bg="#16A34A", fg="#FFFFFF", activebackground="#15803D", activeforeground="#FFFFFF",
@@ -2946,23 +3237,22 @@ class WorkshopMixin:
             command=dlg.destroy
         ).pack(side=tk.BOTTOM, anchor=tk.E, pady=(8, 0))
 
-        refresh_slot_labels()
+        refresh_slot_cards()
         load_controls_for_role("idle")
 
     # =========================================================================
     # --- CONFIGURACIÓN DE OJOS QUE SIGUEN AL MOUSE (ESTILO HONK) ---
     # =========================================================================
     def _update_eyes_switch_style(self, enabled):
-        if hasattr(self, "w_indep_eyes_check"):
-            if enabled:
-                self.w_indep_eyes_check.config(bg="#DCFCE7", fg="#166534", activebackground="#BBF7D0")
-            else:
-                self.w_indep_eyes_check.config(bg="#F1F5F9", fg="#0F172A", activebackground="#E2E8F0")
         if hasattr(self, "w_eyes_cfg_btn"):
-            self.w_eyes_cfg_btn.config(
-                bg="#E0F2FE" if enabled else "#F1F5F9",
-                fg="#0369A1" if enabled else "#64748B",
-            )
+            if enabled:
+                self.w_eyes_cfg_btn.config(
+                    text="👀 Ojos ✓", bg="#DCFCE7", fg="#166534", activebackground="#BBF7D0"
+                )
+            else:
+                self.w_eyes_cfg_btn.config(
+                    text="👀 Ojos", bg="#F1F5F9", fg="#334155", activebackground="#E2E8F0"
+                )
 
     def _apply_independent_eyes_to_character(self, char_name, eyes_cfg):
         folder_path = self._get_character_folder(char_name)
@@ -3012,11 +3302,14 @@ class WorkshopMixin:
         flip_x = bool(target_dict.get("flip_x", False))
 
         eyes_cfg = normalize_independent_eyes(target_dict.get("independent_eyes"), folder_path=folder_path)
+        if not eyes_cfg.get("eye_sets"):
+            eyes_cfg["eye_sets"] = {"default": default_eye_set("Normal")}
+            eyes_cfg["active_set"] = "default"
 
         dlg = tk.Toplevel(self.root)
-        dlg.title(f"👀 Ojos al Mouse (Estilo Honk) - {curr_name}")
-        dlg.geometry("900x670")
-        dlg.minsize(820, 620)
+        dlg.title(f"👀 Estudio de Ojos (Estilo Mii) — {curr_name}")
+        dlg.geometry("960x690")
+        dlg.minsize(860, 620)
         dlg.configure(bg="#DFE5EE")
         dlg.transient(self.root)
         dlg.grab_set()
@@ -3024,285 +3317,94 @@ class WorkshopMixin:
         main_f = tk.Frame(dlg, bg="#DFE5EE", padx=12, pady=10)
         main_f.pack(fill=tk.BOTH, expand=True)
 
-        # Cabecera
+        # Cabecera limpia
         hdr = tk.Frame(main_f, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=8)
         hdr.pack(fill=tk.X, pady=(0, 8))
         tk.Label(
-            hdr, text=f"👀 Ojos que Siguen al Mouse — {curr_name}",
+            hdr, text=f"👀 Estudio de Ojos — {curr_name}",
             font=("Segoe UI", 11, "bold"), bg="#FFFFFF", fg="#0F172A"
         ).pack(side=tk.LEFT)
+        tk.Label(
+            hdr, text="Elige qué set usa cada escena con 1 clic, o arma tus sets aparte",
+            font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B"
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
-        enabled_var = tk.BooleanVar(value=bool(eyes_cfg.get("enabled", False)))
-
-        def on_enable_toggle():
-            eyes_cfg["enabled"] = bool(enabled_var.get())
-            if hasattr(self, "w_indep_eyes_var"):
-                self.w_indep_eyes_var.set(eyes_cfg["enabled"])
-                self._update_eyes_switch_style(eyes_cfg["enabled"])
-            commit_and_sync()
-
-        tk.Checkbutton(
-            hdr, text="Activar seguimiento al mouse", variable=enabled_var, command=on_enable_toggle,
-            bg="#DCFCE7" if enabled_var.get() else "#F1F5F9", fg="#0F172A",
-            font=("Segoe UI", 9, "bold"), padx=8, pady=2, relief="solid", bd=1, cursor="hand2"
-        ).pack(side=tk.RIGHT)
-
-        # Cuerpo en 2 columnas
         body = tk.Frame(main_f, bg="#DFE5EE")
         body.pack(fill=tk.BOTH, expand=True)
 
-        # Columna izquierda: Vista previa interactiva
+        # =====================================================================
+        # COLUMNA IZQUIERDA: VISTA PREVIA + CONTROLES MII (CRUCETA / ± / GIRO)
+        # =====================================================================
         left_col = tk.Frame(body, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=10)
         left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=False, padx=(0, 8))
 
-        tk.Label(
-            left_col, text="VISTA PREVIA (Arrastra las pupilas, rueda = escala)",
-            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#3671C6"
-        ).pack(anchor=tk.W, pady=(0, 6))
-
-        prev_size = 330
-        preview_canvas = tk.Canvas(left_col, width=prev_size, height=prev_size, bg="#F8FBFF", highlightthickness=2, highlightbackground="#CBD5E1")
-        preview_canvas.pack(pady=(0, 8))
-
-        # Selector de pose a editar
         pose_row = tk.Frame(left_col, bg="#FFFFFF")
         pose_row.pack(fill=tk.X, pady=(0, 6))
-        tk.Label(pose_row, text="Pose a editar:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+        tk.Label(pose_row, text="Escena / Pose:", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A").pack(side=tk.LEFT)
 
         pose_choices = [
-            ("idle", "Quieto (idle)"),
-            ("talk", "Hablando (talk)"),
-            ("idle_blink", "Pestañeo (idle_blink)"),
+            ("idle", "Base / Quieto"),
+            ("talk", "Hablando"),
+            ("idle_blink", "Pestañeo"),
             ("talk_blink", "Hablando + Pestañeo"),
-            ("scream", "Grito (scream)"),
+            ("scream", "Grito"),
         ]
         for ex in (target_dict.get("extra_expressions") or []):
             r_id = ex.get("role")
             if r_id:
-                pose_choices.append((r_id, ex.get("name", r_id)))
+                pose_choices.append((r_id, ex.get("title", ex.get("name", r_id)).split("(")[0].strip()))
 
         label_to_role = {lbl: r for r, lbl in pose_choices}
         role_to_label = {r: lbl for r, lbl in pose_choices}
-        pose_var = tk.StringVar(value=role_to_label.get("idle", "Quieto (idle)"))
+        pose_var = tk.StringVar(value=role_to_label.get("idle", "Base / Quieto"))
         pose_combo = ttk.Combobox(pose_row, textvariable=pose_var, values=[lbl for _, lbl in pose_choices], state="readonly", width=24)
         pose_combo.pack(side=tk.RIGHT)
 
+        prev_size = 320
+        preview_canvas = tk.Canvas(
+            left_col, width=prev_size, height=prev_size, bg="#F8FBFF",
+            highlightthickness=2, highlightbackground="#94A3B8", cursor="fleur"
+        )
+        preview_canvas.pack(pady=(0, 6))
+
         live_test_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
-            left_col, text="🎯 Probar seguimiento en vivo con mi mouse",
+            left_col, text="🎯 Probar seguimiento con mi mouse (arrastra para mover, rueda = tamaño)",
             variable=live_test_var, bg="#FFFFFF", fg="#0369A1",
             font=("Segoe UI", 8, "bold"), cursor="hand2"
-        ).pack(anchor=tk.W, pady=(2, 4))
+        ).pack(anchor=tk.W, pady=(0, 6))
 
-        tk.Label(
-            left_col,
-            text="💡 Consejo: Dibuja tu personaje con los ojos blancos\n(sin pupilas) y carga aquí solo las pupilas en PNG.",
-            font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", justify=tk.LEFT
-        ).pack(anchor=tk.W)
+        # Cruceta Mii + Tamaño + Giro
+        mii_bar = tk.Frame(left_col, bg="#F1F5F9", padx=8, pady=6, relief="solid", bd=1)
+        mii_bar.pack(fill=tk.X)
 
-        # Columna derecha: Imagen de pupilas + sliders
-        right_scroll = ScrollableFrame(body, bg="#FFFFFF")
-        right_scroll.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        rc = right_scroll.content
-
-        # Sección 1: Imagen PNG de las pupilas
-        sp_box = tk.LabelFrame(rc, text="1. Imagen de Pupilas / Ojos (PNG transparente)", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
-        sp_box.pack(fill=tk.X, padx=8, pady=(6, 8))
-
-        sprite_lbl = tk.Label(sp_box, text="Sin imagen seleccionada", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
-        sprite_lbl.pack(fill=tk.X, pady=(0, 6))
-
-        btn_row = tk.Frame(sp_box, bg="#FFFFFF")
-        btn_row.pack(fill=tk.X)
-
-        def refresh_sprite_label():
-            p = eyes_cfg.get("sprite") or ""
-            if p and os.path.exists(str(p)):
-                sprite_lbl.config(text=f"✅ {os.path.basename(str(p))}", fg="#15803D")
-            else:
-                sprite_lbl.config(text="❌ Sin imagen de pupilas", fg="#64748B")
-
-        def choose_eyes_png():
-            path = filedialog.askopenfilename(
-                parent=dlg,
-                title="Seleccionar imagen de pupilas (PNG transparente)",
-                filetypes=[("Imágenes PNG / WebP / GIF", "*.png *.webp *.gif"), ("Todos los archivos", "*.*")]
-            )
-            if not path:
-                return
-            eyes_dir = os.path.join(folder_path, "eyes")
-            os.makedirs(eyes_dir, exist_ok=True)
-            ext = os.path.splitext(path)[1].lower() or ".png"
-            dest = os.path.join(eyes_dir, f"pupils{ext}")
-            try:
-                if os.path.abspath(path) != os.path.abspath(dest):
-                    shutil.copy2(path, dest)
-            except Exception:
-                dest = path
-
-            eyes_cfg["sprite"] = dest
-            try:
-                eyes_cfg["sprite_rel"] = os.path.relpath(dest, folder_path).replace("\\", "/")
-            except Exception:
-                eyes_cfg["sprite_rel"] = ""
-            if not enabled_var.get():
-                enabled_var.set(True)
-                eyes_cfg["enabled"] = True
-                if hasattr(self, "w_indep_eyes_var"):
-                    self.w_indep_eyes_var.set(True)
-                    self._update_eyes_switch_style(True)
-            refresh_sprite_label()
-            load_eyes_pil()
-            commit_and_sync()
-            render_preview()
-
-        def clear_eyes_png():
-            eyes_cfg["sprite"] = ""
-            eyes_cfg["sprite_rel"] = ""
-            refresh_sprite_label()
-            load_eyes_pil()
-            commit_and_sync()
-            render_preview()
-
-        tk.Button(
-            btn_row, text="📂 Seleccionar Pupilas (PNG)", font=("Segoe UI", 8, "bold"),
-            bg="#E0F2FE", fg="#0369A1", relief="solid", bd=1, padx=10, pady=3, cursor="hand2",
-            command=choose_eyes_png
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            btn_row, text="🗑️ Quitar", font=("Segoe UI", 8),
-            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
-            command=clear_eyes_png
-        ).pack(side=tk.LEFT, padx=(6, 0))
-
-        # Máscara de recorte (Esclerótica) + Pestañas superiores (Estilo Anime)
-        tk.Frame(sp_box, height=1, bg="#E2E8F0").pack(fill=tk.X, pady=(8, 6))
-        tk.Label(
-            sp_box, text="Opcional (Estilo Anime / Recorte):",
-            font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#0369A1", anchor="w"
-        ).pack(fill=tk.X)
-
-        mask_lbl = tk.Label(sp_box, text="", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
-        mask_lbl.pack(fill=tk.X, pady=(2, 2))
-        mask_btn_row = tk.Frame(sp_box, bg="#FFFFFF")
-        mask_btn_row.pack(fill=tk.X, pady=(0, 4))
-
-        overlay_lbl = tk.Label(sp_box, text="", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B", anchor="w")
-        overlay_lbl.pack(fill=tk.X, pady=(4, 2))
-        overlay_btn_row = tk.Frame(sp_box, bg="#FFFFFF")
-        overlay_btn_row.pack(fill=tk.X)
-
-        show_mask_var = tk.BooleanVar(value=bool(eyes_cfg.get("show_mask", False)))
-
-        def refresh_extra_layer_labels():
-            mp = eyes_cfg.get("mask_sprite") or ""
-            if mp and os.path.exists(str(mp)):
-                mask_lbl.config(text=f"🎭 Máscara (Recorte): {os.path.basename(str(mp))}", fg="#15803D")
-            else:
-                mask_lbl.config(text="🎭 Máscara (Lo blanco del ojo): Ninguna", fg="#64748B")
-            op = eyes_cfg.get("overlay_sprite") or ""
-            if op and os.path.exists(str(op)):
-                overlay_lbl.config(text=f"✨ Pestañas / Contorno arriba: {os.path.basename(str(op))}", fg="#15803D")
-            else:
-                overlay_lbl.config(text="✨ Pestañas / Contorno arriba: Ninguno", fg="#64748B")
-
-        def choose_extra_eye_layer(cfg_key, rel_key, fname_base, title_txt):
-            path = filedialog.askopenfilename(
-                parent=dlg,
-                title=title_txt,
-                filetypes=[("Imágenes PNG / WebP / GIF", "*.png *.webp *.gif"), ("Todos los archivos", "*.*")]
-            )
-            if not path:
-                return
-            eyes_dir = os.path.join(folder_path, "eyes")
-            os.makedirs(eyes_dir, exist_ok=True)
-            ext = os.path.splitext(path)[1].lower() or ".png"
-            dest = os.path.join(eyes_dir, f"{fname_base}{ext}")
-            try:
-                if os.path.abspath(path) != os.path.abspath(dest):
-                    shutil.copy2(path, dest)
-            except Exception:
-                dest = path
-            eyes_cfg[cfg_key] = dest
-            try:
-                eyes_cfg[rel_key] = os.path.relpath(dest, folder_path).replace("\\", "/")
-            except Exception:
-                eyes_cfg[rel_key] = ""
-            refresh_extra_layer_labels()
-            load_eyes_pil()
-            commit_and_sync()
-            render_preview()
-
-        def clear_extra_eye_layer(cfg_key, rel_key):
-            eyes_cfg[cfg_key] = ""
-            eyes_cfg[rel_key] = ""
-            refresh_extra_layer_labels()
-            load_eyes_pil()
-            commit_and_sync()
-            render_preview()
-
-        def on_show_mask_toggle():
-            eyes_cfg["show_mask"] = bool(show_mask_var.get())
-            commit_and_sync()
-            render_preview()
-
-        tk.Button(
-            mask_btn_row, text="🎭 Cargar Máscara (Recorte)", font=("Segoe UI", 8),
-            bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
-            command=lambda: choose_extra_eye_layer("mask_sprite", "mask_sprite_rel", "mask", "Seleccionar máscara de recorte (lo blanco del ojo)")
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            mask_btn_row, text="🗑️", font=("Segoe UI", 8),
-            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=6, pady=2, cursor="hand2",
-            command=lambda: clear_extra_eye_layer("mask_sprite", "mask_sprite_rel")
-        ).pack(side=tk.LEFT, padx=(4, 8))
-        tk.Checkbutton(
-            mask_btn_row, text="Dibujar blanco detrás", variable=show_mask_var, command=on_show_mask_toggle,
-            bg="#FFFFFF", fg="#334155", font=("Segoe UI", 8), cursor="hand2"
-        ).pack(side=tk.LEFT)
-
-        tk.Button(
-            overlay_btn_row, text="✨ Cargar Pestañas Arriba", font=("Segoe UI", 8),
-            bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
-            command=lambda: choose_extra_eye_layer("overlay_sprite", "overlay_sprite_rel", "lashes", "Seleccionar pestañas / contorno superior (PNG)")
-        ).pack(side=tk.LEFT)
-        tk.Button(
-            overlay_btn_row, text="🗑️", font=("Segoe UI", 8),
-            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=6, pady=2, cursor="hand2",
-            command=lambda: clear_extra_eye_layer("overlay_sprite", "overlay_sprite_rel")
-        ).pack(side=tk.LEFT, padx=(4, 0))
-
-        # Sección 2: Parámetros de seguimiento
-        trk_box = tk.LabelFrame(rc, text="2. Comportamiento del Seguimiento", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
-        trk_box.pack(fill=tk.X, padx=8, pady=(0, 8))
-
-        radius_var = tk.IntVar(value=int(eyes_cfg.get("mouse_radius", 12)))
-        smooth_var = tk.IntVar(value=int(eyes_cfg.get("smoothness", 35)))
-        sens_var = tk.IntVar(value=int(eyes_cfg.get("sensitivity", 300)))
-        bounce_var = tk.BooleanVar(value=bool(eyes_cfg.get("follows_bounce", True)))
-        hide_blink_var = tk.BooleanVar(value=bool(eyes_cfg.get("hide_on_blink", True)))
-
-        # Sección 3: Posición / Escala / Rotación
-        pos_box = tk.LabelFrame(rc, text="3. Posición, Tamaño y Pose", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8)
-        pos_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+        dpad_f = tk.Frame(mii_bar, bg="#F1F5F9")
+        dpad_f.pack(side=tk.LEFT)
 
         ox_var = tk.IntVar(value=int(eyes_cfg.get("offset_x", 0)))
         oy_var = tk.IntVar(value=int(eyes_cfg.get("offset_y", 0)))
         sc_var = tk.IntVar(value=int(eyes_cfg.get("scale", 100)))
         rot_var = tk.IntVar(value=int(eyes_cfg.get("rotation", 0)))
-        hidden_var = tk.BooleanVar(value=False)
+
+        # Variables del set actualmente en edición
+        active_sid = str(eyes_cfg.get("active_set") or "default")
+        if active_sid not in eyes_cfg["eye_sets"]:
+            active_sid = next(iter(eyes_cfg["eye_sets"]))
 
         state = {
             "role": "idle",
+            "editing_set": active_sid,
             "updating_vars": False,
             "sync_job": None,
             "drag_active": False,
             "drag_start_xy": (0, 0),
             "drag_orig_off": (0, 0),
             "pil_cache": {},
+            "thumb_cache": {},
             "eyes_cache": EyesRenderCache(),
             "eye_ox": 0.0,
             "eye_oy": 0.0,
+            "adv_open": False,
         }
 
         def load_eyes_pil():
@@ -3333,50 +3435,443 @@ class WorkshopMixin:
                 state["sync_job"] = None
             if immediate:
                 self._apply_independent_eyes_to_character(curr_name, eyes_cfg)
+                if hasattr(self, "w_indep_eyes_var"):
+                    on = bool(eyes_cfg.get("enabled", False))
+                    self.w_indep_eyes_var.set(on)
+                    self._update_eyes_switch_style(on)
             else:
-                state["sync_job"] = dlg.after(160, lambda: self._apply_independent_eyes_to_character(curr_name, eyes_cfg))
+                def _do():
+                    self._apply_independent_eyes_to_character(curr_name, eyes_cfg)
+                    if hasattr(self, "w_indep_eyes_var"):
+                        on = bool(eyes_cfg.get("enabled", False))
+                        self.w_indep_eyes_var.set(on)
+                        self._update_eyes_switch_style(on)
+                state["sync_job"] = dlg.after(160, _do)
+
+        def nudge_pos(dx, dy):
+            eff_dx = -dx if flip_x else dx
+            ox_var.set(max(-180, min(180, int(ox_var.get()) + eff_dx)))
+            oy_var.set(max(-180, min(180, int(oy_var.get()) + dy)))
+            commit_position_change()
+
+        def nudge_scale(ds):
+            sc_var.set(max(10, min(280, int(sc_var.get()) + ds)))
+            commit_position_change()
+
+        def nudge_rot(dr):
+            rot_var.set(max(-180, min(180, int(rot_var.get()) + dr)))
+            commit_position_change()
+
+        def center_x():
+            ox_var.set(0)
+            commit_position_change()
+
+        btn_s = {"font": ("Segoe UI", 8, "bold"), "bg": "#FFFFFF", "fg": "#0F172A", "relief": "solid", "bd": 1, "cursor": "hand2", "width": 3}
+        tk.Button(dpad_f, text="▲", command=lambda: nudge_pos(0, -2), **btn_s).grid(row=0, column=1, padx=1, pady=1)
+        tk.Button(dpad_f, text="◀", command=lambda: nudge_pos(-2, 0), **btn_s).grid(row=1, column=0, padx=1, pady=1)
+        tk.Button(dpad_f, text="⊙", command=center_x, **btn_s).grid(row=1, column=1, padx=1, pady=1)
+        tk.Button(dpad_f, text="▶", command=lambda: nudge_pos(2, 0), **btn_s).grid(row=1, column=2, padx=1, pady=1)
+        tk.Button(dpad_f, text="▼", command=lambda: nudge_pos(0, 2), **btn_s).grid(row=2, column=1, padx=1, pady=1)
+
+        sr_f = tk.Frame(mii_bar, bg="#F1F5F9")
+        sr_f.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
+
+        sz_row = tk.Frame(sr_f, bg="#F1F5F9")
+        sz_row.pack(fill=tk.X, pady=(2, 6))
+        tk.Label(sz_row, text="Tamaño:", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#334155", width=7, anchor="w").pack(side=tk.LEFT)
+        tk.Button(sz_row, text="➖", command=lambda: nudge_scale(-5), **btn_s).pack(side=tk.LEFT, padx=2)
+        size_val_lbl = tk.Label(sz_row, text="100%", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0369A1", width=5)
+        size_val_lbl.pack(side=tk.LEFT)
+        tk.Button(sz_row, text="➕", command=lambda: nudge_scale(5), **btn_s).pack(side=tk.LEFT, padx=2)
+
+        rt_row = tk.Frame(sr_f, bg="#F1F5F9")
+        rt_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(rt_row, text="Girar:", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#334155", width=7, anchor="w").pack(side=tk.LEFT)
+        tk.Button(rt_row, text="↺", command=lambda: nudge_rot(-5), **btn_s).pack(side=tk.LEFT, padx=2)
+        rot_val_lbl = tk.Label(rt_row, text="0°", font=("Segoe UI", 8, "bold"), bg="#F1F5F9", fg="#0369A1", width=5)
+        rot_val_lbl.pack(side=tk.LEFT)
+        tk.Button(rt_row, text="↻", command=lambda: nudge_rot(5), **btn_s).pack(side=tk.LEFT, padx=2)
+        tk.Button(rt_row, text="0°", font=("Segoe UI", 7, "bold"), bg="#E2E8F0", fg="#334155", relief="solid", bd=1, cursor="hand2", padx=4, command=lambda: (rot_var.set(0), commit_position_change())).pack(side=tk.LEFT, padx=(4, 0))
+
+        # =====================================================================
+        # COLUMNA DERECHA: CUADRÍCULA MII + TALLER DE PIEZA + AVANZADO
+        # =====================================================================
+        right_scroll = ScrollableFrame(body, bg="#FFFFFF")
+        right_scroll.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        rc = right_scroll.content
+
+        # --- SECCIÓN 1: CUADRÍCULA TIPO MII ("¿Qué ojos usa esta escena?") ---
+        mii_box = tk.LabelFrame(
+            rc, text=" 1. Ojos en esta escena (1 clic para cambiar) ",
+            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8
+        )
+        mii_box.pack(fill=tk.X, padx=8, pady=(6, 8))
+
+        mii_hdr = tk.Frame(mii_box, bg="#FFFFFF")
+        mii_hdr.pack(fill=tk.X, pady=(0, 6))
+        scene_info_lbl = tk.Label(
+            mii_hdr, text="Escena actual: Base / Quieto",
+            font=("Segoe UI", 8, "bold"), bg="#E0F2FE", fg="#0369A1", padx=6, pady=2
+        )
+        scene_info_lbl.pack(side=tk.LEFT)
+
+        grid_frame = tk.Frame(mii_box, bg="#FFFFFF")
+        grid_frame.pack(fill=tk.X)
+
+        def make_set_thumb(scfg):
+            key = (scfg.get("sprite", ""), scfg.get("mask_sprite", ""), scfg.get("overlay_sprite", ""), bool(scfg.get("show_mask", False)))
+            if key in state["thumb_cache"]:
+                return state["thumb_cache"][key]
+            # Componer mini-vista del set
+            tmp = EyesRenderCache()
+            tmp.load_pil_frame({"eye_sets": {"t": scfg}, "active_set": "t"}, flip_x=False)
+            slot = tmp._get_slot("t")
+            base_im = None
+            if slot:
+                ref = slot["mask_pil"] or slot["overlay_pil"] or slot["pil_img"]
+                if ref is not None:
+                    cw, ch = ref.size
+                    comp = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+                    if slot["mask_pil"] is not None and scfg.get("show_mask", False):
+                        comp.alpha_composite(slot["mask_pil"])
+                    if slot["pil_img"] is not None:
+                        px = (cw - slot["pil_img"].width) // 2
+                        py = (ch - slot["pil_img"].height) // 2
+                        comp.paste(slot["pil_img"], (px, py), slot["pil_img"])
+                    if slot["overlay_pil"] is not None:
+                        comp.alpha_composite(slot["overlay_pil"])
+                    comp.thumbnail((40, 40), Image.Resampling.LANCZOS)
+                    base_im = ImageTk.PhotoImage(comp)
+            state["thumb_cache"][key] = base_im
+            return base_im
+
+        def select_set_for_scene(sid):
+            r = state["role"]
+            if sid == "none":
+                if r == "idle":
+                    eyes_cfg["enabled"] = False
+                else:
+                    ov = eyes_cfg.setdefault("frame_overrides", {})
+                    cur = ov.get(r, {"offset_x": eyes_cfg["offset_x"], "offset_y": eyes_cfg["offset_y"], "scale": eyes_cfg["scale"], "rotation": eyes_cfg["rotation"], "hidden": True})
+                    cur["eye_set"] = "none"
+                    cur["hidden"] = True
+                    ov[r] = cur
+            else:
+                eyes_cfg["enabled"] = True
+                if r == "idle":
+                    eyes_cfg["active_set"] = sid
+                else:
+                    ov = eyes_cfg.setdefault("frame_overrides", {})
+                    cur = ov.get(r, {"offset_x": eyes_cfg["offset_x"], "offset_y": eyes_cfg["offset_y"], "scale": eyes_cfg["scale"], "rotation": eyes_cfg["rotation"], "hidden": False})
+                    cur["eye_set"] = sid
+                    cur["hidden"] = False
+                    ov[r] = cur
+                state["editing_set"] = sid
+                load_piece_editor()
+            refresh_mii_grid()
+            commit_and_sync()
+            render_preview()
+
+        def create_new_eye_set():
+            idx = len(eyes_cfg["eye_sets"]) + 1
+            new_id = f"set_{idx}"
+            while new_id in eyes_cfg["eye_sets"]:
+                idx += 1
+                new_id = f"set_{idx}"
+            eyes_cfg["eye_sets"][new_id] = default_eye_set(f"Ojos {idx}")
+            select_set_for_scene(new_id)
+
+        def delete_current_eye_set():
+            if len(eyes_cfg["eye_sets"]) <= 1:
+                return
+            sid = state["editing_set"]
+            if sid in eyes_cfg["eye_sets"]:
+                eyes_cfg["eye_sets"].pop(sid, None)
+            first_sid = next(iter(eyes_cfg["eye_sets"]))
+            if eyes_cfg.get("active_set") == sid:
+                eyes_cfg["active_set"] = first_sid
+            for ov in (eyes_cfg.get("frame_overrides") or {}).values():
+                if isinstance(ov, dict) and ov.get("eye_set") == sid:
+                    ov.pop("eye_set", None)
+            state["editing_set"] = first_sid
+            load_eyes_pil()
+            load_piece_editor()
+            refresh_mii_grid()
+            commit_and_sync()
+            render_preview()
+
+        tk.Button(
+            mii_hdr, text="➕ Nuevo Set", font=("Segoe UI", 8, "bold"),
+            bg="#DCFCE7", fg="#166534", relief="solid", bd=1, padx=8, pady=1, cursor="hand2",
+            command=create_new_eye_set
+        ).pack(side=tk.RIGHT)
+
+        def refresh_mii_grid():
+            for w in grid_frame.winfo_children():
+                w.destroy()
+            r = state["role"]
+            if r == "idle" and not eyes_cfg.get("enabled", False):
+                curr_sid = "none"
+            else:
+                curr_sid, _ = resolve_eye_set_for_role(eyes_cfg, r)
+                hid, *_ = resolve_eyes_frame_config(eyes_cfg, r)
+                if hid:
+                    curr_sid = "none"
+
+            cards = [("none", "Dibujo PNG", None)] + [(sid, scfg.get("name", sid), scfg) for sid, scfg in eyes_cfg["eye_sets"].items()]
+            cols = 4
+            for i, (sid, label, scfg) in enumerate(cards):
+                is_sel = (curr_sid == sid)
+                card = tk.Frame(
+                    grid_frame,
+                    bg="#DBEAFE" if is_sel else "#F8FAFC",
+                    highlightthickness=2 if is_sel else 1,
+                    highlightbackground="#2563EB" if is_sel else "#CBD5E1",
+                    padx=6, pady=6, cursor="hand2"
+                )
+                card.grid(row=i // cols, column=i % cols, padx=4, pady=4, sticky="nsew")
+
+                if sid == "none":
+                    ico = tk.Label(card, text="🚫", font=("Segoe UI", 16), bg=card["bg"])
+                    ico.pack()
+                else:
+                    th = make_set_thumb(scfg)
+                    if th is not None:
+                        ico = tk.Label(card, image=th, bg=card["bg"], width=42, height=42)
+                        ico._th = th
+                        ico.pack()
+                    else:
+                        ico = tk.Label(card, text="👀", font=("Segoe UI", 16), bg=card["bg"])
+                        ico.pack()
+
+                txt = tk.Label(
+                    card, text=label[:12], font=("Segoe UI", 8, "bold" if is_sel else "normal"),
+                    bg=card["bg"], fg="#1E3A8A" if is_sel else "#334155"
+                )
+                txt.pack(pady=(2, 0))
+
+                for w in (card, ico, txt):
+                    w.bind("<Button-1>", lambda _e, s=sid: select_set_for_scene(s))
+
+            for c in range(cols):
+                grid_frame.columnconfigure(c, weight=1)
+
+        # --- SECCIÓN 2: TALLER DE LA PIEZA (CAPAS EN ORDEN VISUAL) ---
+        piece_box = tk.LabelFrame(
+            rc, text=" 2. Editar Pieza de Ojos (Aparte) ",
+            font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#0F172A", padx=10, pady=8
+        )
+        piece_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        piece_top = tk.Frame(piece_box, bg="#FFFFFF")
+        piece_top.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(piece_top, text="Nombre del set:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
+        set_name_var = tk.StringVar(value="Normal")
+        set_name_entry = tk.Entry(piece_top, textvariable=set_name_var, font=("Segoe UI", 8, "bold"), width=18, relief="solid", bd=1)
+        set_name_entry.pack(side=tk.LEFT, padx=(6, 8))
+
+        def on_rename_set(*_a):
+            if state["updating_vars"]:
+                return
+            sid = state["editing_set"]
+            if sid in eyes_cfg["eye_sets"]:
+                eyes_cfg["eye_sets"][sid]["name"] = set_name_var.get().strip() or sid
+                refresh_mii_grid()
+                commit_and_sync()
+
+        set_name_var.trace_add("write", on_rename_set)
+
+        del_set_btn = tk.Button(
+            piece_top, text="🗑️ Borrar Set", font=("Segoe UI", 8),
+            bg="#FEE2E2", fg="#991B1B", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+            command=delete_current_eye_set
+        )
+        del_set_btn.pack(side=tk.RIGHT)
+
+        track_mouse_var = tk.BooleanVar(value=True)
+        show_mask_var = tk.BooleanVar(value=False)
+
+        def on_piece_toggle():
+            sid = state["editing_set"]
+            scfg = eyes_cfg["eye_sets"].get(sid)
+            if not scfg:
+                return
+            scfg["track_mouse"] = bool(track_mouse_var.get())
+            scfg["show_mask"] = bool(show_mask_var.get())
+            state["thumb_cache"].clear()
+            refresh_mii_grid()
+            commit_and_sync()
+            render_preview()
+
+        tk.Checkbutton(
+            piece_box, text="🎯 Seguir al mouse (desactívalo para ojos fijos como ^_^ o cerrados)",
+            variable=track_mouse_var, command=on_piece_toggle,
+            bg="#FFFFFF", fg="#0369A1", font=("Segoe UI", 8, "bold"), cursor="hand2"
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        # Sándwich de 3 capas
+        layer_rows = {}
+
+        def choose_layer_file(cfg_key, rel_key, fname_prefix, title_txt):
+            path = filedialog.askopenfilename(
+                parent=dlg, title=title_txt,
+                filetypes=[("Imágenes PNG / WebP / GIF", "*.png *.webp *.gif"), ("Todos los archivos", "*.*")]
+            )
+            if not path:
+                return
+            sid = state["editing_set"]
+            scfg = eyes_cfg["eye_sets"].get(sid)
+            if not scfg:
+                return
+            eyes_dir = os.path.join(folder_path, "eyes")
+            os.makedirs(eyes_dir, exist_ok=True)
+            ext = os.path.splitext(path)[1].lower() or ".png"
+            suffix = "" if sid == "default" else f"_{sid}"
+            dest = os.path.join(eyes_dir, f"{fname_prefix}{suffix}{ext}")
+            try:
+                if os.path.abspath(path) != os.path.abspath(dest):
+                    shutil.copy2(path, dest)
+            except Exception:
+                dest = path
+            scfg[cfg_key] = dest
+            try:
+                scfg[rel_key] = os.path.relpath(dest, folder_path).replace("\\", "/")
+            except Exception:
+                scfg[rel_key] = ""
+            eyes_cfg["enabled"] = True
+            state["thumb_cache"].clear()
+            load_eyes_pil()
+            refresh_layer_cards()
+            refresh_mii_grid()
+            commit_and_sync()
+            render_preview()
+
+        def clear_layer_file(cfg_key, rel_key):
+            sid = state["editing_set"]
+            scfg = eyes_cfg["eye_sets"].get(sid)
+            if not scfg:
+                return
+            scfg[cfg_key] = ""
+            scfg[rel_key] = ""
+            state["thumb_cache"].clear()
+            load_eyes_pil()
+            refresh_layer_cards()
+            refresh_mii_grid()
+            commit_and_sync()
+            render_preview()
+
+        layers_spec = [
+            ("overlay_sprite", "overlay_sprite_rel", "lashes", "✨ Arriba: Pestañas / Contorno", "Seleccionar pestañas / contorno superior"),
+            ("sprite", "sprite_rel", "pupils", "🎯 Medio: Pupilas (se mueven)", "Seleccionar pupilas"),
+            ("mask_sprite", "mask_sprite_rel", "mask", "👁️ Fondo: Máscara / Blanco", "Seleccionar máscara de recorte"),
+        ]
+
+        for ck, rk, fp, title_l, dlg_t in layers_spec:
+            card = tk.Frame(piece_box, bg="#F8FAFC", relief="solid", bd=1, padx=8, pady=5)
+            card.pack(fill=tk.X, pady=2)
+            th_lbl = tk.Label(card, text="—", width=5, height=2, bg="#E2E8F0", fg="#64748B", font=("Segoe UI", 8))
+            th_lbl.pack(side=tk.LEFT, padx=(0, 8))
+            info_f = tk.Frame(card, bg="#F8FAFC")
+            info_f.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            tk.Label(info_f, text=title_l, font=("Segoe UI", 8, "bold"), bg="#F8FAFC", fg="#0F172A", anchor="w").pack(fill=tk.X)
+            fn_lbl = tk.Label(info_f, text="Sin imagen", font=("Segoe UI", 8), bg="#F8FAFC", fg="#64748B", anchor="w")
+            fn_lbl.pack(fill=tk.X)
+
+            btns_f = tk.Frame(card, bg="#F8FAFC")
+            btns_f.pack(side=tk.RIGHT)
+            if ck == "mask_sprite":
+                tk.Checkbutton(
+                    btns_f, text="Blanco detrás", variable=show_mask_var, command=on_piece_toggle,
+                    bg="#F8FAFC", fg="#334155", font=("Segoe UI", 8), cursor="hand2"
+                ).pack(side=tk.LEFT, padx=(0, 6))
+            tk.Button(
+                btns_f, text="📂", font=("Segoe UI", 8), bg="#E0F2FE", fg="#0369A1",
+                relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+                command=lambda c=ck, r=rk, p=fp, t=dlg_t: choose_layer_file(c, r, p, t)
+            ).pack(side=tk.LEFT)
+            tk.Button(
+                btns_f, text="🗑️", font=("Segoe UI", 8), bg="#FEE2E2", fg="#991B1B",
+                relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+                command=lambda c=ck, r=rk: clear_layer_file(c, r)
+            ).pack(side=tk.LEFT, padx=(4, 0))
+            layer_rows[ck] = (th_lbl, fn_lbl)
+
+        def refresh_layer_cards():
+            scfg = eyes_cfg["eye_sets"].get(state["editing_set"]) or {}
+            for ck, _, _, _, _ in layers_spec:
+                th_lbl, fn_lbl = layer_rows[ck]
+                p = scfg.get(ck) or ""
+                if p and os.path.exists(str(p)):
+                    fn_lbl.config(text=f"✅ {os.path.basename(str(p))}", fg="#15803D")
+                    try:
+                        im = Image.open(p).convert("RGBA")
+                        im.thumbnail((32, 32), Image.Resampling.LANCZOS)
+                        tk_im = ImageTk.PhotoImage(im)
+                        th_lbl.config(image=tk_im, text="", width=34, height=34)
+                        th_lbl._im = tk_im
+                    except Exception:
+                        th_lbl.config(image="", text="PNG", width=5, height=2)
+                else:
+                    fn_lbl.config(text="Opcional / Sin imagen" if ck != "sprite" else "Sin pupilas", fg="#64748B")
+                    th_lbl.config(image="", text="—", width=5, height=2)
+            del_set_btn.config(state=tk.NORMAL if len(eyes_cfg["eye_sets"]) > 1 else tk.DISABLED)
+
+        # Presets rápidos de movimiento
+        preset_f = tk.Frame(piece_box, bg="#FFFFFF")
+        preset_f.pack(fill=tk.X, pady=(6, 0))
+        tk.Label(preset_f, text="Movimiento:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT, padx=(0, 6))
+
+        radius_var = tk.IntVar(value=12)
+        smooth_var = tk.IntVar(value=35)
+        sens_var = tk.IntVar(value=300)
+        bounce_var = tk.BooleanVar(value=bool(eyes_cfg.get("follows_bounce", True)))
+        hide_blink_var = tk.BooleanVar(value=bool(eyes_cfg.get("hide_on_blink", True)))
+
+        def apply_preset(rad, sm, se):
+            radius_var.set(rad)
+            smooth_var.set(sm)
+            sens_var.set(se)
+            commit_tracking_change()
+
+        for lbl, rad, sm, se in (("Sutil", 8, 28, 420), ("Normal", 16, 40, 300), ("Exagerado", 28, 55, 200)):
+            tk.Button(
+                preset_f, text=lbl, font=("Segoe UI", 8, "bold"),
+                bg="#F1F5F9", fg="#0F172A", relief="solid", bd=1, padx=8, pady=1, cursor="hand2",
+                command=lambda r=rad, s=sm, e=se: apply_preset(r, s, e)
+            ).pack(side=tk.LEFT, padx=2)
+
+        # --- SECCIÓN 3: ACORDEÓN AVANZADO ---
+        adv_hdr = tk.Frame(rc, bg="#FFFFFF")
+        adv_hdr.pack(fill=tk.X, padx=8, pady=(0, 4))
+        adv_box = tk.LabelFrame(rc, text=" Físicas y opciones avanzadas ", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569", padx=10, pady=8)
+
+        def toggle_adv():
+            state["adv_open"] = not state["adv_open"]
+            if state["adv_open"]:
+                adv_btn.config(text="▼ Ocultar Avanzado (Físicas y Opciones)")
+                adv_box.pack(fill=tk.X, padx=8, pady=(0, 8))
+            else:
+                adv_btn.config(text="▶ Avanzado (Físicas y Opciones)")
+                adv_box.pack_forget()
+
+        adv_btn = tk.Button(
+            adv_hdr, text="▶ Avanzado (Físicas y Opciones)", font=("Segoe UI", 8, "bold"),
+            bg="#F1F5F9", fg="#475569", relief="solid", bd=1, padx=8, pady=3, cursor="hand2",
+            anchor="w", command=toggle_adv
+        )
+        adv_btn.pack(fill=tk.X)
 
         def commit_tracking_change(*_a):
             if state["updating_vars"]:
                 return
-            eyes_cfg["mouse_radius"] = int(radius_var.get())
-            eyes_cfg["smoothness"] = int(smooth_var.get())
-            eyes_cfg["sensitivity"] = int(sens_var.get())
+            scfg = eyes_cfg["eye_sets"].get(state["editing_set"])
+            if scfg:
+                scfg["mouse_radius"] = int(radius_var.get())
+                scfg["smoothness"] = int(smooth_var.get())
+                scfg["sensitivity"] = int(sens_var.get())
             eyes_cfg["follows_bounce"] = bool(bounce_var.get())
             eyes_cfg["hide_on_blink"] = bool(hide_blink_var.get())
             commit_and_sync()
-            render_preview()
-
-        def commit_position_change(*_a):
-            if state["updating_vars"]:
-                return
-            r = state["role"]
-            ox = int(ox_var.get())
-            oy = int(oy_var.get())
-            sc = int(sc_var.get())
-            rot = int(rot_var.get())
-            hid = bool(hidden_var.get())
-            if r == "idle":
-                eyes_cfg["offset_x"] = ox
-                eyes_cfg["offset_y"] = oy
-                eyes_cfg["scale"] = sc
-                eyes_cfg["rotation"] = rot
-            else:
-                ov = eyes_cfg.setdefault("frame_overrides", {})
-                ov[r] = {"offset_x": ox, "offset_y": oy, "scale": sc, "rotation": rot, "hidden": hid}
-            commit_and_sync()
-            render_preview()
-
-        def load_controls_for_role(role):
-            state["role"] = role
-            state["updating_vars"] = True
-            hid, ox, oy, sc, rot, _ = resolve_eyes_frame_config(eyes_cfg, role)
-            ox_var.set(ox)
-            oy_var.set(oy)
-            sc_var.set(sc)
-            rot_var.set(rot)
-            hidden_var.set(hid)
-            state["updating_vars"] = False
             render_preview()
 
         def add_slider(parent, label, var, lo, hi, cmd):
@@ -3385,41 +3880,18 @@ class WorkshopMixin:
             tk.Label(row, text=label, width=19, anchor="w", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#334155").pack(side=tk.LEFT)
             val_lbl = tk.Label(row, text=str(var.get()), width=5, font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#0369A1")
             val_lbl.pack(side=tk.RIGHT)
-
-            def on_s(v):
-                val_lbl.config(text=str(int(float(v))))
-                cmd()
-
-            s = ttk.Scale(row, from_=lo, to=hi, orient=tk.HORIZONTAL, variable=var, command=on_s)
+            s = ttk.Scale(row, from_=lo, to=hi, orient=tk.HORIZONTAL, variable=var, command=lambda v: (val_lbl.config(text=str(int(float(v)))), cmd()))
             s.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=4)
             return val_lbl
 
-        add_slider(trk_box, "Rango de movimiento (px):", radius_var, 1, 80, commit_tracking_change)
-        add_slider(trk_box, "Suavizado (%):", smooth_var, 5, 100, commit_tracking_change)
-        add_slider(trk_box, "Distancia sensibilidad:", sens_var, 50, 900, commit_tracking_change)
+        add_slider(adv_box, "Rango de movimiento:", radius_var, 1, 80, commit_tracking_change)
+        add_slider(adv_box, "Suavizado (%):", smooth_var, 5, 100, commit_tracking_change)
+        add_slider(adv_box, "Sensibilidad:", sens_var, 50, 900, commit_tracking_change)
 
-        chk_row = tk.Frame(trk_box, bg="#FFFFFF")
+        chk_row = tk.Frame(adv_box, bg="#FFFFFF")
         chk_row.pack(fill=tk.X, pady=(4, 0))
-        tk.Checkbutton(
-            chk_row, text="Seguir rebote", variable=bounce_var, command=commit_tracking_change,
-            bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold"), cursor="hand2"
-        ).pack(side=tk.LEFT)
-        tk.Checkbutton(
-            chk_row, text="Ocultar al pestañear", variable=hide_blink_var, command=commit_tracking_change,
-            bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold"), cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(12, 0))
-
-        add_slider(pos_box, "Posición X:", ox_var, -180, 180, commit_position_change)
-        add_slider(pos_box, "Posición Y:", oy_var, -180, 180, commit_position_change)
-        add_slider(pos_box, "Escala (%):", sc_var, 10, 280, commit_position_change)
-        add_slider(pos_box, "Rotación (°):", rot_var, -180, 180, commit_position_change)
-
-        pose_opt_row = tk.Frame(pos_box, bg="#FFFFFF")
-        pose_opt_row.pack(fill=tk.X, pady=(4, 0))
-        tk.Checkbutton(
-            pose_opt_row, text="Ocultar pupilas solo en esta pose", variable=hidden_var, command=commit_position_change,
-            bg="#FFFFFF", fg="#991B1B", font=("Segoe UI", 8, "bold"), cursor="hand2"
-        ).pack(side=tk.LEFT)
+        tk.Checkbutton(chk_row, text="Seguir rebote", variable=bounce_var, command=commit_tracking_change, bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT)
+        tk.Checkbutton(chk_row, text="Ocultar al pestañear", variable=hide_blink_var, command=commit_tracking_change, bg="#FFFFFF", fg="#0F172A", font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=(10, 0))
 
         def reset_pose_override():
             r = state["role"]
@@ -3434,10 +3906,69 @@ class WorkshopMixin:
             commit_and_sync()
 
         tk.Button(
-            pose_opt_row, text="Restablecer pose", font=("Segoe UI", 8),
-            bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+            adv_box, text="⟲ Restablecer posición de esta escena", font=("Segoe UI", 8),
+            bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=8, pady=2, cursor="hand2",
             command=reset_pose_override
-        ).pack(side=tk.RIGHT)
+        ).pack(anchor=tk.E, pady=(6, 0))
+
+        # =====================================================================
+        # SINCRONIZACIÓN DE CONTROLES Y RENDERIZADO DE PREVIEW
+        # =====================================================================
+        def load_piece_editor():
+            state["updating_vars"] = True
+            scfg = eyes_cfg["eye_sets"].get(state["editing_set"]) or {}
+            set_name_var.set(scfg.get("name", state["editing_set"]))
+            track_mouse_var.set(bool(scfg.get("track_mouse", True)))
+            show_mask_var.set(bool(scfg.get("show_mask", False)))
+            radius_var.set(int(scfg.get("mouse_radius", 12)))
+            smooth_var.set(int(scfg.get("smoothness", 35)))
+            sens_var.set(int(scfg.get("sensitivity", 300)))
+            state["updating_vars"] = False
+            refresh_layer_cards()
+
+        def commit_position_change(*_a):
+            if state["updating_vars"]:
+                return
+            r = state["role"]
+            ox = int(ox_var.get())
+            oy = int(oy_var.get())
+            sc = int(sc_var.get())
+            rot = int(rot_var.get())
+            size_val_lbl.config(text=f"{sc}%")
+            rot_val_lbl.config(text=f"{rot}°")
+            if r == "idle":
+                eyes_cfg["offset_x"] = ox
+                eyes_cfg["offset_y"] = oy
+                eyes_cfg["scale"] = sc
+                eyes_cfg["rotation"] = rot
+            else:
+                ov = eyes_cfg.setdefault("frame_overrides", {})
+                cur = ov.get(r, {})
+                cur.update({"offset_x": ox, "offset_y": oy, "scale": sc, "rotation": rot})
+                if "hidden" not in cur:
+                    cur["hidden"] = False
+                ov[r] = cur
+            commit_and_sync()
+            render_preview()
+
+        def load_controls_for_role(role):
+            state["role"] = role
+            scene_info_lbl.config(text=f"Escena actual: {role_to_label.get(role, role)}")
+            state["updating_vars"] = True
+            _, ox, oy, sc, rot, _ = resolve_eyes_frame_config(eyes_cfg, role)
+            ox_var.set(ox)
+            oy_var.set(oy)
+            sc_var.set(sc)
+            rot_var.set(rot)
+            size_val_lbl.config(text=f"{sc}%")
+            rot_val_lbl.config(text=f"{rot}°")
+            sid, _ = resolve_eye_set_for_role(eyes_cfg, role)
+            if sid != "none" and sid in eyes_cfg["eye_sets"]:
+                state["editing_set"] = sid
+            state["updating_vars"] = False
+            load_piece_editor()
+            refresh_mii_grid()
+            render_preview()
 
         def render_preview():
             if not dlg.winfo_exists():
@@ -3457,14 +3988,21 @@ class WorkshopMixin:
                 preview_canvas._av_tk = av_tk
 
             hid, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(eyes_cfg, r)
-            if not hid and state["eyes_cache"].pil_img is not None:
+            sid, scfg = resolve_eye_set_for_role(eyes_cfg, r)
+            if r == "idle" and not eyes_cfg.get("enabled", False):
+                hid = True
+
+            if not hid and sid != "none" and scfg is not None:
                 eff_ox = -ox if flip_x else ox
                 bx = cx + int(eff_ox * pos_scale)
                 by = cy + int(oy * pos_scale)
 
-                if live_test_var.get() and not state["drag_active"]:
+                if ox == 0:
+                    preview_canvas.create_line(cx, 8, cx, prev_size - 8, fill="#38BDF8", dash=(4, 4), width=1)
+
+                if live_test_var.get() and not state["drag_active"] and scfg.get("track_mouse", True):
                     state["eye_ox"], state["eye_oy"] = compute_mouse_eye_offset(
-                        preview_canvas, bx, by, pos_scale, eyes_cfg, state["eye_ox"], state["eye_oy"]
+                        preview_canvas, bx, by, pos_scale, scfg, state["eye_ox"], state["eye_oy"]
                     )
                 else:
                     state["eye_ox"], state["eye_oy"] = 0.0, 0.0
@@ -3476,29 +4014,28 @@ class WorkshopMixin:
                     rotation=eff_rot,
                     eye_ox=state["eye_ox"],
                     eye_oy=state["eye_oy"],
-                    show_mask=bool(eyes_cfg.get("show_mask", False)),
+                    show_mask=bool(scfg.get("show_mask", False)),
+                    set_id=sid,
                 )
                 if e_tk is not None:
                     ex, ey = (bx, by) if anchored else (bx + state["eye_ox"], by + state["eye_oy"])
-                    rad_px = max(2, int(eyes_cfg.get("mouse_radius", 12) * pos_scale))
-                    preview_canvas.create_oval(
-                        bx - rad_px, by - rad_px, bx + rad_px, by + rad_px,
-                        outline="#38BDF8", dash=(3, 3), width=1
-                    )
+                    if scfg.get("track_mouse", True):
+                        rad_px = max(2, int(scfg.get("mouse_radius", 12) * pos_scale))
+                        preview_canvas.create_oval(
+                            bx - rad_px, by - rad_px, bx + rad_px, by + rad_px,
+                            outline="#38BDF8", dash=(3, 3), width=1
+                        )
                     preview_canvas.create_image(ex, ey, anchor=tk.CENTER, image=e_tk)
                     preview_canvas._e_tk = e_tk
 
         def tick_preview_loop():
             if not dlg.winfo_exists():
                 return
-            if live_test_var.get() and not state["drag_active"] and state["eyes_cache"].pil_img is not None:
+            if live_test_var.get() and not state["drag_active"]:
                 render_preview()
             dlg.after(30, tick_preview_loop)
 
-        def on_pose_selected(_e=None):
-            load_controls_for_role(label_to_role.get(pose_var.get(), "idle"))
-
-        pose_combo.bind("<<ComboboxSelected>>", on_pose_selected)
+        pose_combo.bind("<<ComboboxSelected>>", lambda _e=None: load_controls_for_role(label_to_role.get(pose_var.get(), "idle")))
 
         def on_canvas_down(event):
             state["drag_active"] = True
@@ -3515,8 +4052,11 @@ class WorkshopMixin:
             if flip_x:
                 dx_off = -dx_off
             dy_off = int(round(dy_px / max(0.1, pos_scale)))
+            new_ox = max(-180, min(180, state["drag_orig_off"][0] + dx_off))
+            if abs(new_ox) <= 3:
+                new_ox = 0
             state["updating_vars"] = True
-            ox_var.set(max(-180, min(180, state["drag_orig_off"][0] + dx_off)))
+            ox_var.set(new_ox)
             oy_var.set(max(-180, min(180, state["drag_orig_off"][1] + dy_off)))
             state["updating_vars"] = False
             commit_position_change()
@@ -3526,12 +4066,7 @@ class WorkshopMixin:
 
         def on_canvas_wheel(event):
             num = getattr(event, "num", None)
-            if num == 4:
-                step = 5
-            elif num == 5:
-                step = -5
-            else:
-                step = 5 if getattr(event, "delta", 0) > 0 else -5
+            step = 5 if (num == 4 or getattr(event, "delta", 0) > 0) else -5
             new_sc = max(10, min(280, int(sc_var.get()) + step))
             if new_sc != sc_var.get():
                 state["updating_vars"] = True
@@ -3553,8 +4088,135 @@ class WorkshopMixin:
             command=dlg.destroy
         ).pack(side=tk.BOTTOM, anchor=tk.E, pady=(8, 0))
 
-        refresh_sprite_label()
-        refresh_extra_layer_labels()
         load_eyes_pil()
         load_controls_for_role("idle")
         dlg.after(30, tick_preview_loop)
+
+    # =========================================================================
+    # --- PERFILES DE EMOCIÓN (5 CUADROS NUMERADOS / RENOMBRABLES) ---
+    # =========================================================================
+    def _get_active_emotion_idx(self, target_dict):
+        if not isinstance(target_dict, dict):
+            return 0
+        try:
+            idx = int(target_dict.get("active_emotion", 0) or 0)
+        except Exception:
+            idx = 0
+        return max(0, min(4, idx))
+
+    def _get_emotion_slot_obj(self, target_dict, idx):
+        if not isinstance(target_dict, dict):
+            return None
+        slots = target_dict.get("emotion_slots")
+        if not isinstance(slots, list) or len(slots) < 5:
+            slots = default_emotion_slots()
+            target_dict["emotion_slots"] = slots
+        if 0 <= idx < len(slots):
+            return slots[idx]
+        return None
+
+    def _refresh_emotion_slots_bar(self, target_dict):
+        if not hasattr(self, "w_emotion_btns"):
+            return
+        active_idx = self._get_active_emotion_idx(target_dict)
+        slots = target_dict.get("emotion_slots")
+        if not isinstance(slots, list) or len(slots) < 5:
+            slots = default_emotion_slots()
+            target_dict["emotion_slots"] = slots
+        for idx, btn in enumerate(self.w_emotion_btns):
+            sl = slots[idx] if idx < len(slots) else {}
+            lbl = str(sl.get("name") or str(idx + 1)).strip() or str(idx + 1)
+            if len(lbl) > 12:
+                lbl = lbl[:11] + "…"
+            has_own = (idx == 0) or bool(sl.get("images"))
+            is_sel = (idx == active_idx)
+            btn.config(
+                text=lbl,
+                bg="#2563EB" if is_sel else ("#E0F2FE" if has_own else "#F1F5F9"),
+                fg="#FFFFFF" if is_sel else ("#0369A1" if has_own else "#475569"),
+                activebackground="#1D4ED8" if is_sel else "#CBD5E1",
+                activeforeground="#FFFFFF" if is_sel else "#0F172A",
+            )
+
+    def _sync_emotion_change(self, curr_name, is_p1):
+        self._save_character_folder_meta(curr_name)
+        self.save_profiles_to_disk()
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        self._refresh_emotion_slots_bar(target_dict)
+        self._rebuild_workshop_sprite_slots(target_dict, "a1" if is_p1 else "a2")
+        self.p1_live_avatar.set_character(self.p1_data, prefix="a1")
+        self.p2_live_avatar.set_character(self.p2_data, prefix="a2")
+        self.w_live_avatar.set_character(target_dict, prefix="a1" if is_p1 else "a2")
+        self._sync_windows_images()
+
+    def _select_emotion_slot(self, idx):
+        is_p1 = (self.workshop_player == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        idx = max(0, min(4, int(idx)))
+        for p_key, rt_d in (
+            ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+            ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+        ):
+            prof = self.profiles.get(p_key, {}).get(curr_name)
+            for d in (prof, rt_d):
+                if isinstance(d, dict):
+                    d["active_emotion"] = idx
+        self._sync_emotion_change(curr_name, is_p1)
+
+    def _on_emotion_slot_right_click(self, event, idx):
+        is_p1 = (self.workshop_player == 1)
+        curr_name = self.global_config.get("current_p1_profile" if is_p1 else "current_p2_profile", "Gatito Azul")
+        target_dict = self.p1_data if is_p1 else self.p2_data
+        sl = self._get_emotion_slot_obj(target_dict, idx) or {}
+        cur_label = str(sl.get("name") or str(idx + 1))
+
+        menu = tk.Menu(self.root, tearoff=0, bg="#0F172A", fg="#F8FAFC", activebackground="#2563EB", activeforeground="#FFFFFF", font=("Segoe UI", 9, "bold"))
+
+        def rename_slot():
+            new_n = simpledialog.askstring(
+                "Renombrar perfil de emoción",
+                f"Nombre para el perfil {idx + 1} (vacío para volver al número '{idx + 1}'):",
+                initialvalue=cur_label,
+                parent=self.root
+            )
+            if new_n is None:
+                return
+            final_n = new_n.strip() or str(idx + 1)
+            for p_key, rt_d in (
+                ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+            ):
+                prof = self.profiles.get(p_key, {}).get(curr_name)
+                for d in (prof, rt_d):
+                    if isinstance(d, dict):
+                        slots = d.setdefault("emotion_slots", default_emotion_slots())
+                        if idx < len(slots):
+                            slots[idx]["name"] = final_n
+            self._sync_emotion_change(curr_name, is_p1)
+
+        def clear_slot_poses():
+            if idx == 0:
+                return
+            for p_key, rt_d in (
+                ("player1", self.p1_data if self.global_config.get("current_p1_profile") == curr_name else None),
+                ("player2", self.p2_data if self.global_config.get("current_p2_profile") == curr_name else None),
+            ):
+                prof = self.profiles.get(p_key, {}).get(curr_name)
+                for d in (prof, rt_d):
+                    if isinstance(d, dict):
+                        slots = d.setdefault("emotion_slots", default_emotion_slots())
+                        if idx < len(slots):
+                            slots[idx]["images"] = {}
+                            slots[idx]["images_rel"] = {}
+                            slots[idx]["motions"] = {}
+                            slots[idx]["motion_speeds"] = {}
+            self._sync_emotion_change(curr_name, is_p1)
+
+        menu.add_command(label=f"✏️ Renombrar '{cur_label}'...", command=rename_slot)
+        if idx > 0:
+            menu.add_separator()
+            menu.add_command(label="🧹 Limpiar poses propias (heredar de 1)", command=clear_slot_poses)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()

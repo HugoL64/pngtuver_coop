@@ -3,12 +3,19 @@ import time
 from PIL import Image, ImageTk
 
 MOUTH_SLOTS = ("closed", "half", "open", "wide")
+VOWEL_SLOTS = ("vowel_a", "vowel_e", "vowel_i", "vowel_o", "vowel_u")
+ALL_MOUTH_SLOTS = MOUTH_SLOTS + VOWEL_SLOTS
 
 MOUTH_SLOT_LABELS = {
     "closed": "Cerrada",
     "half": "Semi-abierta",
     "open": "Abierta",
     "wide": "Muy abierta / O",
+    "vowel_a": "Vocal A",
+    "vowel_e": "Vocal E",
+    "vowel_i": "Vocal I",
+    "vowel_o": "Vocal O",
+    "vowel_u": "Vocal U",
 }
 
 _SQUASH_RATIOS = (1.0, 1.10, 1.22)
@@ -18,14 +25,15 @@ def default_independent_mouth():
     """Devuelve la configuración base por defecto para la boca independiente."""
     return {
         "enabled": False,
+        "mode": "volume",
         "offset_x": 0,
         "offset_y": 0,
         "scale": 100,
         "rotation": 0,
         "follows_bounce": True,
         "squash_strength": 100,
-        "sprites": {s: "" for s in MOUTH_SLOTS},
-        "sprites_rel": {s: "" for s in MOUTH_SLOTS},
+        "sprites": {s: "" for s in ALL_MOUTH_SLOTS},
+        "sprites_rel": {s: "" for s in ALL_MOUTH_SLOTS},
         "frame_overrides": {},
     }
 
@@ -37,6 +45,8 @@ def normalize_independent_mouth(raw_cfg, folder_path=None):
         return base
 
     base["enabled"] = bool(raw_cfg.get("enabled", False))
+    raw_mode = str(raw_cfg.get("mode", "volume") or "volume")
+    base["mode"] = raw_mode if raw_mode in ("volume", "vowels") else "volume"
     base["offset_x"] = int(raw_cfg.get("offset_x", 0))
     base["offset_y"] = int(raw_cfg.get("offset_y", 0))
     base["scale"] = max(10, min(300, int(raw_cfg.get("scale", 100))))
@@ -46,7 +56,7 @@ def normalize_independent_mouth(raw_cfg, folder_path=None):
 
     raw_sprites = raw_cfg.get("sprites") or {}
     raw_rel = raw_cfg.get("sprites_rel") or {}
-    for s in MOUTH_SLOTS:
+    for s in ALL_MOUTH_SLOTS:
         abs_p = str(raw_sprites.get(s, "") or "")
         rel_p = str(raw_rel.get(s, "") or "")
         if folder_path and rel_p:
@@ -88,7 +98,7 @@ def has_any_mouth_sprite(mouth_cfg):
     if not isinstance(mouth_cfg, dict):
         return False
     sprites = mouth_cfg.get("sprites") or {}
-    return any(bool(sprites.get(s)) and os.path.exists(str(sprites.get(s))) for s in MOUTH_SLOTS)
+    return any(bool(sprites.get(s)) and os.path.exists(str(sprites.get(s))) for s in ALL_MOUTH_SLOTS)
 
 
 def is_independent_mouth_active(mouth_cfg):
@@ -140,57 +150,106 @@ class MouthLipsyncEngine:
         self.envelope = 0.0
         self.prev_raw = 0.0
         self.squash_impulse = 0.0
+        self.adaptive_peak = 36.0
+        self._last_desired = "closed"
+        self._last_vowel = None
+        self._last_vowel_time = 0.0
         self.last_time = time.time()
 
     def reset(self):
         self.envelope = 0.0
         self.prev_raw = 0.0
         self.squash_impulse = 0.0
+        self.adaptive_peak = 36.0
+        self._last_desired = "closed"
+        self._last_vowel = None
+        self._last_vowel_time = 0.0
         self.last_time = time.time()
 
-    def update(self, audio_level, talk_threshold, is_talking, is_screaming, is_muted, available_slots, squash_strength=100):
+    def update(self, audio_level, talk_threshold, is_talking, is_screaming, is_muted, available_slots, squash_strength=100, mode="volume", vowel_hint=None):
         now = time.time()
         dt = max(0.001, min(0.05, now - self.last_time))
         self.last_time = now
 
         lvl = float(audio_level or 0.0)
         thresh = max(1.0, float(talk_threshold or 20.0))
+        min_peak = min(100.0, thresh + 22.0)
+        if self.adaptive_peak < min_peak:
+            self.adaptive_peak = min_peak
 
         if is_muted or (not is_talking and not is_screaming and lvl < thresh):
             target = 0.0
             raw = 0.0
+            self.adaptive_peak = max(min_peak, self.adaptive_peak - 6.0 * dt)
         else:
-            denom = max(12.0, 100.0 - thresh)
-            raw = max(0.0, min(1.0, (lvl - thresh * 0.65) / denom))
+            if lvl > self.adaptive_peak:
+                self.adaptive_peak += (lvl - self.adaptive_peak) * min(1.0, 14.0 * dt)
+            else:
+                self.adaptive_peak = max(min_peak, self.adaptive_peak - 5.5 * dt)
+
+            base_floor = thresh * 0.88
+            denom = max(12.0, self.adaptive_peak - base_floor)
+            lin = max(0.0, min(1.0, (lvl - base_floor) / denom))
+            # Curva de compresión suave para que la voz normal recorra half -> open -> wide
+            raw = lin ** 0.85
             if is_talking:
-                raw = max(raw, 0.28)
+                raw = max(raw, 0.20)
             if is_screaming:
                 raw = 1.0
             target = raw
 
-        if target > self.envelope:
-            rate = 28.0
-        else:
-            rate = 14.0
+        rate = 32.0 if target > self.envelope else 16.0
         alpha = min(1.0, rate * dt)
         self.envelope += (target - self.envelope) * alpha
 
         delta = raw - self.prev_raw
         self.prev_raw = raw
-        if delta > 0.10 and (is_talking or is_screaming) and not is_muted:
-            self.squash_impulse = min(1.0, self.squash_impulse + delta * 1.6)
+        if delta > 0.08 and (is_talking or is_screaming) and not is_muted:
+            self.squash_impulse = min(1.0, self.squash_impulse + delta * 1.8)
         self.squash_impulse = max(0.0, self.squash_impulse - 8.5 * dt)
 
-        if self.envelope < 0.14:
-            desired = "closed"
-        elif self.envelope < 0.42:
-            desired = "half"
-        elif self.envelope < 0.78:
-            desired = "open"
-        else:
-            desired = "wide"
+        # Histéresis suave para evitar parpadeo en los bordes de transición
+        e = self.envelope
+        prev = self._last_desired
+        h = 0.03
+        if prev == "closed":
+            desired = "half" if e >= (0.12 + h) else "closed"
+        elif prev == "half":
+            if e < (0.12 - h):
+                desired = "closed"
+            elif e >= (0.34 + h):
+                desired = "open"
+            else:
+                desired = "half"
+        elif prev == "open":
+            if e < (0.34 - h):
+                desired = "half"
+            elif e >= (0.70 + h):
+                desired = "wide"
+            else:
+                desired = "open"
+        else:  # wide
+            desired = "open" if e < (0.70 - h) else "wide"
 
-        slot = self._pick_available_slot(desired, available_slots)
+        # Permitir saltos directos en picos fuertes
+        if e >= 0.76:
+            desired = "wide"
+        elif e < 0.08:
+            desired = "closed"
+        self._last_desired = desired
+
+        if mode == "vowels" and vowel_hint in VOWEL_SLOTS and not is_muted and e >= 0.14:
+            if is_screaming:
+                desired_out = "wide" if "wide" in available_slots else "vowel_o"
+            else:
+                if vowel_hint != self._last_vowel and (now - self._last_vowel_time) >= 0.045:
+                    self._last_vowel = vowel_hint
+                    self._last_vowel_time = now
+                desired_out = self._last_vowel or vowel_hint
+        else:
+            desired_out = desired
+
+        slot = self._pick_available_slot(desired_out, available_slots)
 
         squash_idx = 0
         if squash_strength > 0 and self.squash_impulse > 0.12:
@@ -211,8 +270,13 @@ class MouthLipsyncEngine:
             "half": ("half", "open", "closed", "wide"),
             "open": ("open", "half", "wide", "closed"),
             "wide": ("wide", "open", "half", "closed"),
+            "vowel_a": ("vowel_a", "open", "wide", "half", "closed"),
+            "vowel_e": ("vowel_e", "half", "open", "vowel_i", "closed"),
+            "vowel_i": ("vowel_i", "half", "vowel_e", "open", "closed"),
+            "vowel_o": ("vowel_o", "wide", "open", "half", "closed"),
+            "vowel_u": ("vowel_u", "half", "vowel_o", "closed", "open"),
         }
-        for cand in fallbacks.get(desired, MOUTH_SLOTS):
+        for cand in fallbacks.get(desired, ALL_MOUTH_SLOTS):
             if cand in available_slots:
                 return cand
         return next(iter(available_slots), "closed")
@@ -224,21 +288,23 @@ class MouthRenderCache:
     def __init__(self):
         self.pil_frames = {}   # { slot: [(PIL.Image, dur), ...] }
         self.norm_scales = {}  # { slot: [orig_w / thumb_w, ...] }
+        self.pil_cache = {}    # { key: PIL.Image }
         self.photo_cache = {}  # { (slot, ov_key, frame_idx, squash_idx): ImageTk.PhotoImage }
         self._last_sig = None
 
     def clear(self):
         self.pil_frames.clear()
         self.norm_scales.clear()
+        self.pil_cache.clear()
         self.photo_cache.clear()
         self._last_sig = None
 
-    def load_pil_frames(self, mouth_cfg, flip_x=False, max_dim=384):
+    def load_pil_frames(self, mouth_cfg, flip_x=False, max_dim=None):
         self.clear()
         if not isinstance(mouth_cfg, dict):
             return
         sprites = mouth_cfg.get("sprites") or {}
-        for slot in MOUTH_SLOTS:
+        for slot in ALL_MOUTH_SLOTS:
             path = sprites.get(slot, "")
             if not path or not os.path.exists(path):
                 continue
@@ -247,13 +313,16 @@ class MouthRenderCache:
             try:
                 with Image.open(path) as img:
                     n_frames = min(getattr(img, "n_frames", 1), 30)
+                    # Solo limitar resolución en animaciones multi-frame para ahorrar RAM;
+                    # los PNG estáticos de lienzo completo (ej. 1080x1080) deben conservar su nitidez.
+                    eff_max_dim = max_dim if n_frames > 1 else None
                     for i in range(n_frames):
                         if n_frames > 1:
                             img.seek(i)
                         fr = img.convert("RGBA").copy()
                         orig_w = max(1, fr.width)
-                        if max_dim and max(fr.size) > max_dim:
-                            fr.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                        if eff_max_dim and max(fr.size) > eff_max_dim:
+                            fr.thumbnail((eff_max_dim, eff_max_dim), Image.Resampling.LANCZOS)
                         norm_sc = orig_w / max(1, fr.width)
                         if flip_x:
                             fr = fr.transpose(Image.FLIP_LEFT_RIGHT)
@@ -266,13 +335,13 @@ class MouthRenderCache:
                 self.pil_frames[slot] = frames
                 self.norm_scales[slot] = scales
 
-    def get_photo(self, slot, ov_key, frame_idx, squash_idx, base_scale, scale_pct, rotation_deg, max_cache=64):
+    def get_pil(self, slot, ov_key, frame_idx, squash_idx, base_scale, scale_pct, rotation_deg, max_cache=64):
         frames = self.pil_frames.get(slot)
         if not frames:
             return None
         f_idx = frame_idx % len(frames)
         cache_key = (slot, ov_key, f_idx, squash_idx, round(base_scale, 3), int(scale_pct), int(rotation_deg))
-        cached = self.photo_cache.get(cache_key)
+        cached = self.pil_cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -292,6 +361,25 @@ class MouthRenderCache:
         res_img = pil_img.resize((nw, nh), Image.Resampling.LANCZOS)
         if int(rotation_deg) != 0:
             res_img = res_img.rotate(-int(rotation_deg), expand=True, resample=Image.Resampling.BICUBIC)
+
+        if len(self.pil_cache) > max_cache:
+            self.pil_cache.clear()
+        self.pil_cache[cache_key] = res_img
+        return res_img
+
+    def get_photo(self, slot, ov_key, frame_idx, squash_idx, base_scale, scale_pct, rotation_deg, max_cache=64):
+        frames = self.pil_frames.get(slot)
+        if not frames:
+            return None
+        f_idx = frame_idx % len(frames)
+        cache_key = (slot, ov_key, f_idx, squash_idx, round(base_scale, 3), int(scale_pct), int(rotation_deg))
+        cached = self.photo_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        res_img = self.get_pil(slot, ov_key, frame_idx, squash_idx, base_scale, scale_pct, rotation_deg, max_cache=max_cache)
+        if res_img is None:
+            return None
 
         photo = ImageTk.PhotoImage(res_img)
         if len(self.photo_cache) > max_cache:

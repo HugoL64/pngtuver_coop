@@ -7,6 +7,7 @@ import shutil
 
 from core.app_constants import PROFILES_FILE, CONFIG_FILE, CHARACTERS_DIR, log_debug
 from core.lipsync import normalize_independent_mouth
+from core.emotions import normalize_emotion_slots
 from core.eyes import normalize_independent_eyes
 
 
@@ -479,6 +480,16 @@ class CharacterManagerMixin:
                         p2_dict[f"a2_{r_id}_motion"] = ex["motion"]
 
         loaded_mouth = normalize_independent_mouth(meta_disk.get("independent_mouth"), folder_path=folder_path)
+        loaded_emotions = normalize_emotion_slots(meta_disk.get("emotion_slots"), folder_path=folder_path)
+        loaded_active_em = int(meta_disk.get("active_emotion", 0) or 0)
+        for td in (p1_dict, p2_dict):
+            if isinstance(td, dict):
+                if not isinstance(td.get("emotion_slots"), list):
+                    td["emotion_slots"] = normalize_emotion_slots(loaded_emotions, folder_path=folder_path)
+                else:
+                    td["emotion_slots"] = normalize_emotion_slots(td["emotion_slots"], folder_path=folder_path)
+                if "active_emotion" not in td:
+                    td["active_emotion"] = loaded_active_em
         loaded_eyes = normalize_independent_eyes(meta_disk.get("independent_eyes"), folder_path=folder_path)
         if isinstance(p1_dict, dict):
             if "independent_mouth" not in p1_dict or not isinstance(p1_dict["independent_mouth"], dict):
@@ -605,6 +616,16 @@ class CharacterManagerMixin:
             raw_eyes = p2_dict.get("independent_eyes")
         clean_eyes = normalize_independent_eyes(raw_eyes, folder_path=folder_path)
 
+        raw_emotions = None
+        raw_active_em = 0
+        if isinstance(p1_dict, dict) and isinstance(p1_dict.get("emotion_slots"), list):
+            raw_emotions = p1_dict.get("emotion_slots")
+            raw_active_em = int(p1_dict.get("active_emotion", 0) or 0)
+        elif isinstance(p2_dict, dict) and isinstance(p2_dict.get("emotion_slots"), list):
+            raw_emotions = p2_dict.get("emotion_slots")
+            raw_active_em = int(p2_dict.get("active_emotion", 0) or 0)
+        clean_emotions = normalize_emotion_slots(raw_emotions, folder_path=folder_path)
+
         meta = {
             "name": name,
             "image_mode": p1_dict.get("image_mode", p2_dict.get("image_mode", "4_states")),
@@ -615,6 +636,8 @@ class CharacterManagerMixin:
             "props": clean_props,
             "extra_expressions": clean_extras,
             "independent_mouth": clean_mouth,
+            "emotion_slots": clean_emotions,
+            "active_emotion": max(0, min(4, raw_active_em)),
             "independent_eyes": clean_eyes,
             "motions": motions_map,
             "motion_speeds": speeds_map,

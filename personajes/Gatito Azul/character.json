@@ -9,6 +9,7 @@
   "extra_expressions": [],
   "independent_mouth": {
     "enabled": false,
+    "mode": "volume",
     "offset_x": 0,
     "offset_y": 0,
     "scale": 100,
@@ -19,18 +20,68 @@
       "closed": "",
       "half": "",
       "open": "",
-      "wide": ""
+      "wide": "",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "sprites_rel": {
       "closed": "",
       "half": "",
       "open": "",
-      "wide": ""
+      "wide": "",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "frame_overrides": {}
   },
+  "emotion_slots": [
+    {
+      "name": "1",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "2",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "3",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "4",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "5",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    }
+  ],
+  "active_emotion": 0,
   "independent_eyes": {
     "enabled": false,
+    "active_set": "default",
+    "eye_sets": {},
     "sprite": "",
     "sprite_rel": "",
     "mask_sprite": "",

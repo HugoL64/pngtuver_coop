@@ -57,7 +57,7 @@
       "trigger": "trans_blink_inbetween",
       "title": "👁️ Ojos Semi-Cerrados (Boca cerrada / General)",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_inbetween_38090.png",
-      "motion": "Elástico",
+      "motion": "Balanceo",
       "param": "Rápido (45ms)",
       "speed": 1.0,
       "file_rel": "ext_trans_blink_inbetween_38090.png"
@@ -77,14 +77,15 @@
       "trigger": "idle_fidget",
       "title": "✨ Tic / Gesto espontáneo",
       "file": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_idle_fidget_22978.png",
-      "motion": "Saltitos",
+      "motion": "Balanceo",
       "param": "Cada 15s",
       "speed": 1.0,
       "file_rel": "ext_idle_fidget_22978.png"
     }
   ],
   "independent_mouth": {
-    "enabled": true,
+    "enabled": false,
+    "mode": "volume",
     "offset_x": 0,
     "offset_y": 0,
     "scale": 100,
@@ -95,18 +96,68 @@
       "closed": "",
       "half": "",
       "open": "",
-      "wide": ""
+      "wide": "",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "sprites_rel": {
       "closed": "",
       "half": "",
       "open": "",
-      "wide": ""
+      "wide": "",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "frame_overrides": {}
   },
+  "emotion_slots": [
+    {
+      "name": "1",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "2",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "3",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "4",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "5",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    }
+  ],
+  "active_emotion": 0,
   "independent_eyes": {
     "enabled": false,
+    "active_set": "default",
+    "eye_sets": {},
     "sprite": "",
     "sprite_rel": "",
     "mask_sprite": "",
@@ -134,15 +185,16 @@
     "ext_trans_mouth_inbetween_7062": "Respiración",
     "ext_state_scream_30280": "Flotar",
     "ext_trans_pre_scream_81532": "Balanceo",
-    "ext_trans_blink_inbetween_38090": "Elástico",
+    "ext_trans_blink_inbetween_38090": "Balanceo",
     "ext_trans_blink_talk_inbetween_96899": "Respiración",
-    "ext_idle_fidget_22978": "Saltitos"
+    "ext_idle_fidget_22978": "Balanceo"
   },
   "motion_speeds": {
     "idle": 1.04,
     "idle_blink": 1.0,
     "talk": 0.71,
     "talk_blink": 1.0,
+    "scream": 1.0,
     "ext_trans_mouth_inbetween_7062": 1.0,
     "ext_state_scream_30280": 1.0,
     "ext_trans_pre_scream_81532": 1.0,

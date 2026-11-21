@@ -3,34 +3,100 @@
   "image_mode": "4_states",
   "flip_x": false,
   "mic_threshold": 20,
-  "discord_threshold": 25,
+  "discord_threshold": 46,
   "scream_threshold": 55,
   "props": [],
   "extra_expressions": [],
   "independent_mouth": {
     "enabled": true,
-    "offset_x": -1,
-    "offset_y": 4,
-    "scale": 127,
+    "mode": "vowels",
+    "offset_x": -2,
+    "offset_y": -3,
+    "scale": 37,
     "rotation": 0,
     "follows_bounce": true,
-    "squash_strength": 100,
+    "squash_strength": 160,
     "sprites": {
       "closed": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\closed.png",
       "half": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\half.png",
       "open": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\open.png",
-      "wide": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\wide.png"
+      "wide": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\mouths\\wide.png",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "sprites_rel": {
       "closed": "mouths/closed.png",
       "half": "mouths/half.png",
       "open": "mouths/open.png",
-      "wide": "mouths/wide.png"
+      "wide": "mouths/wide.png",
+      "vowel_a": "",
+      "vowel_e": "",
+      "vowel_i": "",
+      "vowel_o": "",
+      "vowel_u": ""
     },
     "frame_overrides": {}
   },
+  "emotion_slots": [
+    {
+      "name": "1",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "2",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "3",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "4",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    },
+    {
+      "name": "5",
+      "images": {},
+      "images_rel": {},
+      "motions": {},
+      "motion_speeds": {}
+    }
+  ],
+  "active_emotion": 0,
   "independent_eyes": {
     "enabled": true,
+    "active_set": "default",
+    "eye_sets": {
+      "default": {
+        "name": "Normal",
+        "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
+        "sprite_rel": "eyes/pupils.png",
+        "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
+        "mask_sprite_rel": "eyes/mask.png",
+        "show_mask": true,
+        "overlay_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\lashes.png",
+        "overlay_sprite_rel": "eyes/lashes.png",
+        "track_mouse": true,
+        "mouse_radius": 22,
+        "smoothness": 42,
+        "sensitivity": 300
+      }
+    },
     "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
     "sprite_rel": "eyes/pupils.png",
     "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
@@ -40,9 +106,9 @@
     "overlay_sprite_rel": "eyes/lashes.png",
     "offset_x": 0,
     "offset_y": 0,
-    "scale": 31,
+    "scale": 36,
     "rotation": 0,
-    "mouse_radius": 18,
+    "mouse_radius": 22,
     "smoothness": 42,
     "sensitivity": 300,
     "follows_bounce": true,

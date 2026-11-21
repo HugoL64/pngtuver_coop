@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk
 import os
 import sys
@@ -354,8 +354,8 @@ class PNGTuberCoopApp(
         self.opts_f.pack(side=tk.LEFT)
 
         tk.Label(self.opts_f, text="🟩 Fondo OBS (Croma):", font=("Segoe UI", 8, "bold"), bg="#CBD5E1", fg="#1E293B").pack(side=tk.LEFT, padx=(4, 4))
-        self.bg_combo = ttk.Combobox(self.opts_f, values=["Verde (#00FF00)", "Azul (#0000FF)", "Magenta (#FF00FF)", "Negro (#000000)"], state="readonly", width=13)
-        bg_map = {"#00FF00": 0, "#0000FF": 1, "#FF00FF": 2, "#000000": 3}
+        self.bg_combo = ttk.Combobox(self.opts_f, values=["Verde (#00FF00)", "Azul (#0000FF)", "Magenta (#FF00FF)", "Negro (#000000)", "Transparente (Alpha)"], state="readonly", width=18)
+        bg_map = {"#00FF00": 0, "#0000FF": 1, "#FF00FF": 2, "#000000": 3, "TRANSPARENT": 4}
         self.bg_combo.current(bg_map.get(self.global_config.get("bg_color"), 0))
         self.bg_combo.pack(side=tk.LEFT, padx=(0, 10))
         self.bg_combo.bind("<<ComboboxSelected>>", self._on_bg_color_changed)

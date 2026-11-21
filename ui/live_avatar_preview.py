@@ -7,6 +7,7 @@ import math
 import gc
 
 from core.app_constants import log_debug
+from core.emotions import get_effective_pose_data
 from core.async_loader import get_performance_preset, load_pil_frames_from_path, resize_avatar_frames, submit_bg_task
 from core.lipsync import (
     MouthLipsyncEngine,
@@ -18,6 +19,7 @@ from core.eyes import (
     EyesRenderCache,
     compute_mouse_eye_offset,
     is_independent_eyes_active,
+    resolve_eye_set_for_role,
     resolve_eyes_frame_config,
 )
 
@@ -75,6 +77,7 @@ class LiveAvatarPreview(tk.Frame):
         self.extra_expressions = []
         self.is_muted = False
         self.audio_level = 0.0
+        self.vowel_hint = None
         self.talk_threshold = 20.0
         self.partner_talking = False
         self.partner_screaming = False
@@ -195,7 +198,8 @@ class LiveAvatarPreview(tk.Frame):
             cw, ch = self.size[0], self.size[1]
         avail_w = max(20, cw - 16)
         avail_h = max(20, ch - 16)
-        role_paths = {role: self.char_data.get(key) for role, key in keys_map.items()}
+        eff_imgs, _, _ = get_effective_pose_data(self.char_data, prefix=prefix)
+        role_paths = {role: eff_imgs.get(role) or self.char_data.get(key) for role, key in keys_map.items()}
         props_snapshot = [dict(p) for p in (self.char_data.get("props", []) or [])]
         flip_x = self.flip_x
         mouth_cfg = dict(self.independent_mouth) if isinstance(self.independent_mouth, dict) else {}
@@ -741,7 +745,7 @@ class LiveAvatarPreview(tk.Frame):
                 return "idle_blink"
         return "idle"
 
-    def update_state(self, talking, screaming, muted=None, audio_level=None, talk_threshold=None, partner_talking=None, partner_screaming=None):
+    def update_state(self, talking, screaming, muted=None, audio_level=None, talk_threshold=None, partner_talking=None, partner_screaming=None, vowel_hint=None):
         now = time.time()
         mute_changed = False
         if muted is not None:
@@ -751,6 +755,7 @@ class LiveAvatarPreview(tk.Frame):
             self.is_muted = new_m
         if audio_level is not None:
             self.audio_level = float(audio_level)
+        self.vowel_hint = vowel_hint
         if talk_threshold is not None:
             self.talk_threshold = float(talk_threshold)
         if partner_talking is not None:
@@ -1020,6 +1025,8 @@ class LiveAvatarPreview(tk.Frame):
                 self.is_muted,
                 self.mouth_cache.pil_frames.keys(),
                 squash_strength=self.independent_mouth.get("squash_strength", 100),
+                mode=self.independent_mouth.get("mode", "volume"),
+                vowel_hint=getattr(self, "vowel_hint", None),
             )
             if new_slot != self._mouth_slot or new_msquash != self._mouth_squash:
                 self._mouth_slot = new_slot
@@ -1361,36 +1368,47 @@ class LiveAvatarPreview(tk.Frame):
         pos_scale = self._get_pos_scale(w, h, role)
         self._update_eyes_position_only(base_x, base_y, pos_scale, role)
 
+    def _resolve_eyes_draw_params(self, base_x, base_y, pos_scale, role):
+        if not is_independent_eyes_active(self.independent_eyes):
+            return None
+        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, role)
+        if hidden:
+            return None
+        set_id, set_cfg = resolve_eye_set_for_role(self.independent_eyes, role)
+        if set_id == "none" or set_cfg is None:
+            return None
+        bx, by = self._get_eyes_base_coords(base_x, base_y, pos_scale, ox, oy)
+        if set_cfg.get("track_mouse", True):
+            self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
+                self.canvas, bx, by, pos_scale, set_cfg, self._eye_ox, self._eye_oy
+            )
+        else:
+            self._eye_ox, self._eye_oy = 0.0, 0.0
+        eff_rot = -rot_deg if self.flip_x else rot_deg
+        show_mask = bool(set_cfg.get("show_mask", False))
+        return bx, by, sc_pct, eff_rot, set_id, show_mask
+
     def _update_eyes_position_only(self, base_x, base_y, pos_scale, role):
         if self.eyes_item is None:
             return
-        if not is_independent_eyes_active(self.independent_eyes):
+        params = self._resolve_eyes_draw_params(base_x, base_y, pos_scale, role)
+        if params is None:
             try:
                 self.canvas.itemconfig(self.eyes_item, state="hidden")
             except tk.TclError:
                 self.eyes_item = None
             return
-        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, role)
-        if hidden:
-            try:
-                self.canvas.itemconfig(self.eyes_item, state="hidden")
-            except tk.TclError:
-                self.eyes_item = None
-            return
-        bx, by = self._get_eyes_base_coords(base_x, base_y, pos_scale, ox, oy)
-        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
-            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
-        )
+        bx, by, sc_pct, eff_rot, set_id, show_mask = params
         try:
-            if self.eyes_cache.has_mask_or_overlay():
-                eff_rot = -rot_deg if self.flip_x else rot_deg
+            if self.eyes_cache.has_mask_or_overlay(set_id=set_id):
                 e_photo, anchored = self.eyes_cache.get_tk_image(
                     pos_scale,
                     scale_pct=sc_pct,
                     rotation=eff_rot,
                     eye_ox=self._eye_ox,
                     eye_oy=self._eye_oy,
-                    show_mask=bool(self.independent_eyes.get("show_mask", False)),
+                    show_mask=show_mask,
+                    set_id=set_id,
                 )
                 if e_photo is not None:
                     self.canvas.itemconfig(self.eyes_item, image=e_photo, state="normal")
@@ -1404,7 +1422,8 @@ class LiveAvatarPreview(tk.Frame):
             self.eyes_item = None
 
     def _render_preview_eyes_item(self, base_x, base_y, pos_scale, role):
-        if not is_independent_eyes_active(self.independent_eyes):
+        params = self._resolve_eyes_draw_params(base_x, base_y, pos_scale, role)
+        if params is None:
             if self.eyes_item is not None:
                 try:
                     self.canvas.itemconfig(self.eyes_item, state="hidden")
@@ -1412,27 +1431,15 @@ class LiveAvatarPreview(tk.Frame):
                     self.eyes_item = None
             return None
 
-        hidden, ox, oy, sc_pct, rot_deg, _ = resolve_eyes_frame_config(self.independent_eyes, role)
-        if hidden:
-            if self.eyes_item is not None:
-                try:
-                    self.canvas.itemconfig(self.eyes_item, state="hidden")
-                except tk.TclError:
-                    self.eyes_item = None
-            return None
-
-        bx, by = self._get_eyes_base_coords(base_x, base_y, pos_scale, ox, oy)
-        self._eye_ox, self._eye_oy = compute_mouse_eye_offset(
-            self.canvas, bx, by, pos_scale, self.independent_eyes, self._eye_ox, self._eye_oy
-        )
-        eff_rot = -rot_deg if self.flip_x else rot_deg
+        bx, by, sc_pct, eff_rot, set_id, show_mask = params
         e_photo, anchored = self.eyes_cache.get_tk_image(
             pos_scale,
             scale_pct=sc_pct,
             rotation=eff_rot,
             eye_ox=self._eye_ox,
             eye_oy=self._eye_oy,
-            show_mask=bool(self.independent_eyes.get("show_mask", False)),
+            show_mask=show_mask,
+            set_id=set_id,
         )
         if e_photo is None:
             if self.eyes_item is not None:

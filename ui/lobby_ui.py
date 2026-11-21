@@ -1,4 +1,4 @@
-﻿import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 import os
@@ -1396,7 +1396,7 @@ class LobbyMixin:
                 self.p2_mute_btn.config(text="🔇 Silenciar", bg="#1E293B", fg="#F8FAFC")
 
     def _on_bg_color_changed(self, event=None):
-        colors = ["#00FF00", "#0000FF", "#FF00FF", "#000000"]
+        colors = ["#00FF00", "#0000FF", "#FF00FF", "#000000", "TRANSPARENT"]
         c = colors[self.bg_combo.current()]
         self.global_config["bg_color"] = c
         log_debug(f"[CONFIG] Color de fondo croma cambiado a: '{c}'")

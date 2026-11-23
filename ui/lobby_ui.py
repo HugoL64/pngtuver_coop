@@ -66,24 +66,6 @@ class LobbyMixin:
             relief="solid", bd=2, padx=12, pady=2, cursor="hand2",
             command=self._open_twitch_alerts_dialog
         )
-        self.btn_lobby_remote = tk.Button(
-            sub_banner,
-            text="📱  CONTROL REMOTO",
-            font=("Segoe UI", 9, "bold"),
-            bg="#0EA5E9", fg="#FFFFFF",
-            activebackground="#0284C7", activeforeground="#FFFFFF",
-            relief="solid", bd=2, padx=12, pady=2, cursor="hand2",
-            command=self._open_remote_control_placeholder
-        )
-        self.btn_lobby_4p = tk.Button(
-            sub_banner,
-            text="👥  4 PLAYERS MODE",
-            font=("Segoe UI", 9, "bold"),
-            bg="#6366F1", fg="#FFFFFF",
-            activebackground="#4F46E5", activeforeground="#FFFFFF",
-            relief="solid", bd=2, padx=12, pady=2, cursor="hand2",
-            command=self._open_4p_mode_placeholder
-        )
 
         self.eco_status_lbl = tk.Label(
             sub_banner,
@@ -1522,8 +1504,6 @@ class LobbyMixin:
         show = bool(self.global_config.get("experimental_enabled", False))
         for btn in (
             getattr(self, "btn_lobby_twitch", None),
-            getattr(self, "btn_lobby_remote", None),
-            getattr(self, "btn_lobby_4p", None),
         ):
             if btn is None:
                 continue
@@ -2229,7 +2209,7 @@ class LobbyMixin:
         build_option_card(
             "🧪",
             "Opciones experimentales",
-            "Muestra en la barra superior junto a Atajos los botones en desarrollo: Alertas Twitch (receptor local), Control remoto y 4 Players mode.",
+            "Muestra en la barra superior junto a Atajos el botón de Alertas Twitch (receptor local).",
             self.experimental_var,
             self._on_experimental_toggle,
             accent="#9146FF"

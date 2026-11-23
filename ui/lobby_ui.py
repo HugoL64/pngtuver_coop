@@ -73,7 +73,7 @@ class LobbyMixin:
             bg="#0EA5E9", fg="#FFFFFF",
             activebackground="#0284C7", activeforeground="#FFFFFF",
             relief="solid", bd=2, padx=12, pady=2, cursor="hand2",
-            command=self._open_remote_control_placeholder
+            command=self._open_coop_remote_dialog
         )
         self.btn_lobby_4p = tk.Button(
             sub_banner,
@@ -82,7 +82,7 @@ class LobbyMixin:
             bg="#6366F1", fg="#FFFFFF",
             activebackground="#4F46E5", activeforeground="#FFFFFF",
             relief="solid", bd=2, padx=12, pady=2, cursor="hand2",
-            command=self._open_4p_mode_placeholder
+            command=self._open_coop_remote_dialog
         )
 
         self.eco_status_lbl = tk.Label(

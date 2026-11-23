@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src wss: ws://127.0.0.1:* ws://localhost:*; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>PNGTuber Co-op — Control Invitado</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="container">
+    <header class="topbar">
+      <div>
+        <h1>PNGTuber Co-op</h1>
+        <p id="statusText" class="status">Desconectado</p>
+      </div>
+      <span id="slotBadge" class="badge hidden">Slot --</span>
+    </header>
+
+    <div id="alertBanner" class="banner hidden" role="status"></div>
+
+    <!-- Vista de acceso / lobby -->
+    <section id="joinView" class="card">
+      <h2>Unirse a la sala</h2>
+      <p class="hint">Solo se enviará el nivel numérico de tu micrófono (0–100) para animar tu avatar; nunca se graba ni transmite audio.</p>
+
+      <label for="roomInput">Código de sala</label>
+      <input id="roomInput" type="text" maxlength="16" autocomplete="off" placeholder="Ej. K9M4P2XQ">
+
+      <label for="inviteInput">Token de invitación</label>
+      <input id="inviteInput" type="password" maxlength="128" autocomplete="off" placeholder="Viene en el enlace (#)">
+
+      <label for="pinInput">PIN (si el streamer lo pidió)</label>
+      <input id="pinInput" type="password" maxlength="16" autocomplete="off" placeholder="Opcional">
+
+      <label for="nameInput">Tu nombre</label>
+      <input id="nameInput" type="text" maxlength="24" autocomplete="off" placeholder="Ej. Alex">
+
+      <button id="joinBtn" type="button" class="btn primary">Solicitar entrada</button>
+    </section>
+
+    <!-- Vista en espera de aprobación -->
+    <section id="pendingView" class="card hidden">
+      <h2>Esperando aprobación...</h2>
+      <p class="hint">Si el código, invitación y PIN son válidos, el streamer verá tu solicitud en su pantalla.</p>
+      <button id="cancelPendingBtn" type="button" class="btn secondary">Cancelar</button>
+    </section>
+
+    <!-- Vista de control en sesión -->
+    <section id="controlView" class="hidden">
+      <div class="card">
+        <div class="row-between">
+          <h2>Micrófono (Lip-Sync)</h2>
+          <button id="micBtn" type="button" class="btn primary">Activar Micrófono</button>
+        </div>
+        <div class="meter-track" aria-label="Nivel de micrófono">
+          <div id="micMeter" class="meter-fill"></div>
+        </div>
+        <p id="micStatus" class="hint">Micrófono apagado</p>
+      </div>
+
+      <div id="emotionsCard" class="card">
+        <h2>Emociones</h2>
+        <div id="emotionsGrid" class="grid"></div>
+      </div>
+
+      <div id="propsCard" class="card">
+        <h2>Props</h2>
+        <div id="propsGrid" class="grid"></div>
+      </div>
+
+      <div class="card">
+        <h2>Acciones rápidas</h2>
+        <div class="grid">
+          <button id="flipBtn" type="button" class="btn toggle">Voltear (Flip X)</button>
+          <button id="screamBtn" type="button" class="btn danger">Grito</button>
+        </div>
+      </div>
+
+      <div id="charsCard" class="card hidden">
+        <h2>Personaje</h2>
+        <div id="charsGrid" class="grid"></div>
+      </div>
+
+      <button id="leaveBtn" type="button" class="btn secondary full">Salir de la sala</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

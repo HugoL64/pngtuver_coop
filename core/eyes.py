@@ -7,8 +7,21 @@ def default_eye_set(name="Normal"):
     """Devuelve la configuración por defecto de un set/pieza de ojos reutilizable."""
     return {
         "name": str(name or "Normal"),
+        "pupil_mode": "single",
         "sprite": "",
         "sprite_rel": "",
+        "left_sprite": "",
+        "left_sprite_rel": "",
+        "left_offset_x": -30,
+        "left_offset_y": 0,
+        "left_scale": 100,
+        "left_rotation": 0,
+        "right_sprite": "",
+        "right_sprite_rel": "",
+        "right_offset_x": 30,
+        "right_offset_y": 0,
+        "right_scale": 100,
+        "right_rotation": 0,
         "mask_sprite": "",
         "mask_sprite_rel": "",
         "show_mask": False,
@@ -76,14 +89,31 @@ def _normalize_eye_set(raw_set, folder_path=None, fallback_name="Normal", defaul
     ref = defaults if isinstance(defaults, dict) else default_eye_set(fallback_name)
     out = default_eye_set(src.get("name", ref.get("name", fallback_name)))
 
+    out["pupil_mode"] = "dual" if str(src.get("pupil_mode", ref.get("pupil_mode", "single"))) == "dual" else "single"
     out["show_mask"] = bool(src.get("show_mask", ref.get("show_mask", False)))
     out["track_mouse"] = bool(src.get("track_mouse", ref.get("track_mouse", True)))
     out["mouse_radius"] = max(1, min(80, int(src.get("mouse_radius", ref.get("mouse_radius", 12)))))
     out["smoothness"] = max(5, min(100, int(src.get("smoothness", ref.get("smoothness", 35)))))
     out["sensitivity"] = max(50, min(1200, int(src.get("sensitivity", ref.get("sensitivity", 300)))))
 
+    out["left_offset_x"] = int(src.get("left_offset_x", ref.get("left_offset_x", -30)))
+    out["left_offset_y"] = int(src.get("left_offset_y", ref.get("left_offset_y", 0)))
+    out["left_scale"] = max(10, min(300, int(src.get("left_scale", ref.get("left_scale", 100)))))
+    out["left_rotation"] = int(src.get("left_rotation", ref.get("left_rotation", 0)))
+
+    out["right_offset_x"] = int(src.get("right_offset_x", ref.get("right_offset_x", 30)))
+    out["right_offset_y"] = int(src.get("right_offset_y", ref.get("right_offset_y", 0)))
+    out["right_scale"] = max(10, min(300, int(src.get("right_scale", ref.get("right_scale", 100)))))
+    out["right_rotation"] = int(src.get("right_rotation", ref.get("right_rotation", 0)))
+
     out["sprite"], out["sprite_rel"] = _resolve_eye_asset_path(
         src.get("sprite"), src.get("sprite_rel"), folder_path
+    )
+    out["left_sprite"], out["left_sprite_rel"] = _resolve_eye_asset_path(
+        src.get("left_sprite"), src.get("left_sprite_rel"), folder_path
+    )
+    out["right_sprite"], out["right_sprite_rel"] = _resolve_eye_asset_path(
+        src.get("right_sprite"), src.get("right_sprite_rel"), folder_path
     )
     out["mask_sprite"], out["mask_sprite_rel"] = _resolve_eye_asset_path(
         src.get("mask_sprite"), src.get("mask_sprite_rel"), folder_path
@@ -207,9 +237,10 @@ def has_eyes_sprite(eyes_cfg):
     if isinstance(eye_sets, dict):
         for s in eye_sets.values():
             if isinstance(s, dict):
-                ssp = s.get("sprite") or s.get("overlay_sprite") or ""
-                if ssp and os.path.exists(str(ssp)):
-                    return True
+                for key in ("sprite", "left_sprite", "right_sprite", "overlay_sprite"):
+                    ssp = s.get(key) or ""
+                    if ssp and os.path.exists(str(ssp)):
+                        return True
     return False
 
 
@@ -355,11 +386,25 @@ class EyesRenderCache:
 
     def _empty_slot(self):
         return {
+            "pupil_mode": "single",
             "pil_img": None,
+            "left_pil": None,
+            "right_pil": None,
+            "left_ox": -30,
+            "left_oy": 0,
+            "left_scale": 100,
+            "left_rot": 0,
+            "right_ox": 30,
+            "right_oy": 0,
+            "right_scale": 100,
+            "right_rot": 0,
+            "flip_x": False,
             "mask_pil": None,
             "overlay_pil": None,
             "scaled_key": None,
             "scaled_pupil": None,
+            "scaled_left": None,
+            "scaled_right": None,
             "scaled_mask": None,
             "scaled_mask_alpha": None,
             "scaled_overlay": None,
@@ -388,7 +433,23 @@ class EyesRenderCache:
                 if not isinstance(scfg, dict):
                     continue
                 slot = self._empty_slot()
+                slot["pupil_mode"] = "dual" if scfg.get("pupil_mode") == "dual" else "single"
+                slot["flip_x"] = bool(flip_x)
                 slot["pil_img"] = _load_rgba(scfg.get("sprite"), flip_x=flip_x)
+                slot["left_pil"] = _load_rgba(scfg.get("left_sprite"), flip_x=flip_x)
+                slot["right_pil"] = _load_rgba(scfg.get("right_sprite"), flip_x=flip_x)
+                lox = int(scfg.get("left_offset_x", -30))
+                rox = int(scfg.get("right_offset_x", 30))
+                lrot = int(scfg.get("left_rotation", 0))
+                rrot = int(scfg.get("right_rotation", 0))
+                slot["left_ox"] = -lox if flip_x else lox
+                slot["left_oy"] = int(scfg.get("left_offset_y", 0))
+                slot["left_scale"] = int(scfg.get("left_scale", 100))
+                slot["left_rot"] = -lrot if flip_x else lrot
+                slot["right_ox"] = -rox if flip_x else rox
+                slot["right_oy"] = int(scfg.get("right_offset_y", 0))
+                slot["right_scale"] = int(scfg.get("right_scale", 100))
+                slot["right_rot"] = -rrot if flip_x else rrot
                 slot["mask_pil"] = _load_rgba(scfg.get("mask_sprite"), flip_x=flip_x)
                 slot["overlay_pil"] = _load_rgba(scfg.get("overlay_sprite"), flip_x=flip_x)
                 self._sets[str(sid)] = slot
@@ -414,70 +475,103 @@ class EyesRenderCache:
         slot = self._get_slot(set_id)
         if not slot:
             return False
-        return (slot["mask_pil"] is not None) or (slot["overlay_pil"] is not None)
+        return (
+            (slot["mask_pil"] is not None)
+            or (slot["overlay_pil"] is not None)
+            or (slot.get("pupil_mode") == "dual")
+        )
 
     def _ensure_scaled(self, slot, pos_scale, scale_pct=100, rotation=0):
-        key = (round(float(pos_scale), 3), int(scale_pct), int(rotation))
+        key = (
+            round(float(pos_scale), 3),
+            int(scale_pct),
+            int(rotation),
+            slot.get("pupil_mode"),
+            slot.get("left_scale"),
+            slot.get("left_rot"),
+            slot.get("right_scale"),
+            slot.get("right_rot"),
+        )
         if key == slot["scaled_key"]:
             return
         slot["scaled_key"] = key
         slot["scaled_pupil"] = _scale_rotate_pil(slot["pil_img"], pos_scale, scale_pct, rotation)
+        if slot.get("pupil_mode") == "dual":
+            l_sc = max(10, int(round(int(scale_pct) * (int(slot.get("left_scale", 100)) / 100.0))))
+            r_sc = max(10, int(round(int(scale_pct) * (int(slot.get("right_scale", 100)) / 100.0))))
+            slot["scaled_left"] = _scale_rotate_pil(
+                slot["left_pil"], pos_scale, l_sc, int(rotation) + int(slot.get("left_rot", 0))
+            )
+            slot["scaled_right"] = _scale_rotate_pil(
+                slot["right_pil"], pos_scale, r_sc, int(rotation) + int(slot.get("right_rot", 0))
+            )
+        else:
+            slot["scaled_left"] = None
+            slot["scaled_right"] = None
         slot["scaled_mask"] = _scale_rotate_pil(slot["mask_pil"], pos_scale, scale_pct, rotation)
         slot["scaled_mask_alpha"] = slot["scaled_mask"].getchannel("A") if slot["scaled_mask"] is not None else None
         slot["scaled_overlay"] = _scale_rotate_pil(slot["overlay_pil"], pos_scale, scale_pct, rotation)
         slot["comp_key"] = None
 
-    def get_tk_image(self, pos_scale, scale_pct=100, rotation=0, eye_ox=0.0, eye_oy=0.0, show_mask=False, set_id=None):
-        """Devuelve (PhotoImage, anchored_at_base).
-
-        Si hay máscara o pestañas (overlay), compone la pupila recortada en (eye_ox, eye_oy)
-        y devuelve anchored_at_base=True (el item del canvas se queda fijo en la base).
-        """
-        slot = self._get_slot(set_id)
-        if not slot or (slot["pil_img"] is None and slot["overlay_pil"] is None):
-            return None, False
-
+    def _compose_pupils_layer(self, slot, pos_scale, scale_pct, rotation, eye_ox, eye_oy, show_mask):
+        """Compone el frame RGBA final para 1 o 2 pupilas, máscara y overlay."""
         self._ensure_scaled(slot, pos_scale, scale_pct=scale_pct, rotation=rotation)
+        is_dual = (slot.get("pupil_mode") == "dual")
         s_pupil = slot["scaled_pupil"]
+        s_left = slot["scaled_left"]
+        s_right = slot["scaled_right"]
         s_mask = slot["scaled_mask"]
         s_mask_a = slot["scaled_mask_alpha"]
         s_overlay = slot["scaled_overlay"]
 
-        if s_pupil is None and s_overlay is None:
-            return None, False
+        has_any_pupil = (s_left is not None or s_right is not None) if is_dual else (s_pupil is not None)
+        if not has_any_pupil and s_overlay is None:
+            return None, False, False
 
-        # Modo simple (sin máscara ni overlay): el PhotoImage no cambia con el mouse
-        if s_mask is None and s_overlay is None:
-            if slot["comp_key"] != slot["scaled_key"] or slot["tk_img"] is None:
-                slot["comp_key"] = slot["scaled_key"]
-                slot["tk_img"] = ImageTk.PhotoImage(s_pupil)
-            self.tk_img = slot["tk_img"]
-            return slot["tk_img"], False
+        if not is_dual and s_mask is None and s_overlay is None:
+            return s_pupil, False, True
 
-        # Set estático solo con overlay (sin pupilas)
-        if s_pupil is None and s_overlay is not None:
-            if slot["comp_key"] != slot["scaled_key"] or slot["tk_img"] is None:
-                slot["comp_key"] = slot["scaled_key"]
-                slot["tk_img"] = ImageTk.PhotoImage(s_overlay)
-            self.tk_img = slot["tk_img"]
-            return slot["tk_img"], True
+        if not has_any_pupil and s_overlay is not None:
+            return s_overlay, True, True
 
-        # Modo compuesto con máscara de recorte y/o pestañas arriba
         iox = int(round(eye_ox))
         ioy = int(round(eye_oy))
-        ckey = (slot["scaled_key"], iox, ioy, bool(show_mask))
-        if ckey == slot["comp_key"] and slot["tk_img"] is not None:
-            self.tk_img = slot["tk_img"]
-            return slot["tk_img"], True
+        tot_sc = max(0.05, float(pos_scale) * (int(scale_pct) / 100.0))
+        lox = int(round(int(slot.get("left_ox", -30)) * tot_sc))
+        loy = int(round(int(slot.get("left_oy", 0)) * tot_sc))
+        rox = int(round(int(slot.get("right_ox", 30)) * tot_sc))
+        roy = int(round(int(slot.get("right_oy", 0)) * tot_sc))
+
+        ckey = (slot["scaled_key"], iox, ioy, bool(show_mask), lox, loy, rox, roy)
+        if ckey == slot["comp_key"] and slot.get("comp_pil") is not None:
+            return slot["comp_pil"], True, False
 
         slot["comp_key"] = ckey
         ref = s_mask or s_overlay
-        cw, ch = ref.size
+        if ref is not None:
+            cw, ch = ref.size
+        else:
+            # Lienzo suficiente para ambas pupilas y su desplazamiento respecto al centro
+            max_half_w = 32
+            max_half_h = 32
+            for im, ox, oy in ((s_left, lox, loy), (s_right, rox, roy)):
+                if im is not None:
+                    max_half_w = max(max_half_w, abs(ox) + im.width // 2 + abs(iox) + 8)
+                    max_half_h = max(max_half_h, abs(oy) + im.height // 2 + abs(ioy) + 8)
+            cw = max(64, max_half_w * 2)
+            ch = max(64, max_half_h * 2)
 
         pup_layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-        px = (cw - s_pupil.width) // 2 + iox
-        py = (ch - s_pupil.height) // 2 + ioy
-        pup_layer.paste(s_pupil, (px, py), s_pupil)
+        if is_dual:
+            for im, ox, oy in ((s_left, lox, loy), (s_right, rox, roy)):
+                if im is not None:
+                    px = (cw - im.width) // 2 + ox + iox
+                    py = (ch - im.height) // 2 + oy + ioy
+                    pup_layer.paste(im, (px, py), im)
+        else:
+            px = (cw - s_pupil.width) // 2 + iox
+            py = (ch - s_pupil.height) // 2 + ioy
+            pup_layer.paste(s_pupil, (px, py), s_pupil)
 
         if s_mask_a is not None:
             clipped_a = ImageChops.multiply(pup_layer.getchannel("A"), s_mask_a)
@@ -491,52 +585,35 @@ class EyesRenderCache:
             pup_layer.alpha_composite(s_overlay)
 
         slot["comp_pil"] = pup_layer
-        slot["tk_img"] = ImageTk.PhotoImage(pup_layer)
+        return pup_layer, True, False
+
+    def get_tk_image(self, pos_scale, scale_pct=100, rotation=0, eye_ox=0.0, eye_oy=0.0, show_mask=False, set_id=None):
+        """Devuelve (PhotoImage, anchored_at_base)."""
+        slot = self._get_slot(set_id)
+        if not slot:
+            return None, False
+        comp_pil, anchored, is_static = self._compose_pupils_layer(
+            slot, pos_scale, scale_pct, rotation, eye_ox, eye_oy, show_mask
+        )
+        if comp_pil is None:
+            return None, False
+        if is_static and slot["comp_key"] == slot["scaled_key"] and slot["tk_img"] is not None:
+            self.tk_img = slot["tk_img"]
+            return slot["tk_img"], anchored
+        if is_static:
+            slot["comp_key"] = slot["scaled_key"]
+            slot["tk_img"] = ImageTk.PhotoImage(comp_pil)
+        else:
+            slot["tk_img"] = ImageTk.PhotoImage(comp_pil)
         self.tk_img = slot["tk_img"]
-        return slot["tk_img"], True
+        return slot["tk_img"], anchored
 
     def get_composed_pil(self, pos_scale, scale_pct=100, rotation=0, eye_ox=0, eye_oy=0, show_mask=False, set_id=None):
         """Devuelve (PIL.Image RGBA, is_composed) reutilizando el caché para composición Alpha."""
         slot = self._get_slot(set_id)
         if not slot:
             return None, False
-        self._ensure_scaled(slot, pos_scale, scale_pct, rotation)
-        s_pupil = slot["scaled_pupil"]
-        s_mask = slot["scaled_mask"]
-        s_mask_a = slot["scaled_mask_alpha"]
-        s_overlay = slot["scaled_overlay"]
-
-        if s_pupil is None and s_overlay is None:
-            return None, False
-        if s_mask is None and s_overlay is None:
-            return s_pupil, False
-        if s_pupil is None and s_overlay is not None:
-            return s_overlay, True
-
-        iox = int(round(eye_ox))
-        ioy = int(round(eye_oy))
-        ckey = (slot["scaled_key"], iox, ioy, bool(show_mask))
-        if ckey == slot["comp_key"] and slot.get("comp_pil") is not None:
-            return slot["comp_pil"], True
-
-        slot["comp_key"] = ckey
-        ref = s_mask or s_overlay
-        cw, ch = ref.size
-        pup_layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-        px = (cw - s_pupil.width) // 2 + iox
-        py = (ch - s_pupil.height) // 2 + ioy
-        pup_layer.paste(s_pupil, (px, py), s_pupil)
-
-        if s_mask_a is not None:
-            clipped_a = ImageChops.multiply(pup_layer.getchannel("A"), s_mask_a)
-            pup_layer.putalpha(clipped_a)
-            if show_mask:
-                base_layer = s_mask.copy()
-                base_layer.alpha_composite(pup_layer)
-                pup_layer = base_layer
-
-        if s_overlay is not None:
-            pup_layer.alpha_composite(s_overlay)
-
-        slot["comp_pil"] = pup_layer
-        return pup_layer, True
+        comp_pil, anchored, _ = self._compose_pupils_layer(
+            slot, pos_scale, scale_pct, rotation, eye_ox, eye_oy, show_mask
+        )
+        return comp_pil, anchored

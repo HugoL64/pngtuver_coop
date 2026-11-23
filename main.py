@@ -10,9 +10,11 @@ from core.twitch_alerts import TwitchAlertServer
 from core.app_constants import get_resource_path, log_debug
 from ui.lobby_ui import LobbyMixin
 from ui.workshop_ui import WorkshopMixin
+from ui.coop_remote_dialog import CoopRemoteDialogMixin
 from services.character_manager import CharacterManagerMixin
 from services.audio_calibration import AudioCalibrationMixin
 from services.obs_and_alerts import ObsAndAlertsMixin
+from services.remote_control import RemoteControlMixin
 
 # Asegurar soporte de salida UTF-8 en consolas Windows para emojis y caracteres especiales
 if sys.platform.startswith("win"):
@@ -29,9 +31,11 @@ if sys.platform.startswith("win"):
 class PNGTuberCoopApp(
     LobbyMixin,
     WorkshopMixin,
+    CoopRemoteDialogMixin,
     CharacterManagerMixin,
     AudioCalibrationMixin,
     ObsAndAlertsMixin,
+    RemoteControlMixin,
 ):
     def __init__(self, root):
         log_debug("🚀 [SISTEMA] Iniciando PNGTuber Duo Co-op...")
@@ -178,12 +182,17 @@ class PNGTuberCoopApp(
         self._eco_mode = False
 
         # Receptor local de alertas de Twitch (cola por jugador)
+        self._init_guest_runtime()
         self._alert_queues = {1: [], 2: []}
         self._alert_active = {1: False, 2: False}
         self._alert_restore = {1: None, 2: None}
         self._alert_timer = {1: None, 2: None}
         self.twitch_alert_server = TwitchAlertServer(
-            lambda payload: self.root.after(0, lambda p=payload: self._handle_twitch_alert(p))
+            lambda payload: self.root.after(0, lambda p=payload: self._handle_twitch_alert(p)),
+            on_state_callback=lambda: self._run_on_ui_sync(self.get_remote_state),
+            on_action_callback=lambda payload: self._run_on_ui_sync(
+                lambda p=payload: self.dispatch_remote_action(p, source="http")
+            ),
         )
         self._sync_twitch_alert_server()
         self._refresh_experimental_buttons()
@@ -423,12 +432,23 @@ class PNGTuberCoopApp(
                         win.on_close()
                 except Exception:
                     pass
+        for extra_win in (getattr(self, "extra_avatar_windows", {}) or {}).values():
+            if extra_win is not None:
+                try:
+                    if extra_win.winfo_exists():
+                        extra_win.on_close()
+                except Exception:
+                    pass
         try:
             self.save_global_config()
         except Exception:
             pass
         try:
             self.hotkey_listener.stop()
+        except Exception:
+            pass
+        try:
+            self.stop_coop_relay()
         except Exception:
             pass
         try:

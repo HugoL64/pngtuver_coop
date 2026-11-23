@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets', 'assets')]
+datas = [('assets', 'assets'), ('web_guest', 'web_guest')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('process_audio_capture')

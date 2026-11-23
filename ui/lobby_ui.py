@@ -95,12 +95,18 @@ class LobbyMixin:
 
         booths_f = tk.Frame(self.lobby_frame, bg="#DFE5EE")
         booths_f.pack(fill=tk.BOTH, expand=True)
+        booths_f.grid_rowconfigure(0, weight=1)
+        booths_f.grid_columnconfigure(0, weight=1, uniform="booth")
+        booths_f.grid_columnconfigure(1, weight=1, uniform="booth")
+        self.booths_f = booths_f
+        self.remote_lobby_cards = {}
+        self._p2_room_connected = False
 
         # =====================================================================
         # ------------------- TARJETA JUGADOR 1 (IZQUIERDA) -------------------
         # =====================================================================
         self.p1_booth = tk.Frame(booths_f, bg="#FFFFFF", highlightthickness=3, highlightbackground="#242E3B")
-        self.p1_booth.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
+        self.p1_booth.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         self.p1_h = tk.Frame(self.p1_booth, bg="#3671C6", height=36, padx=10)
         self.p1_h.pack(fill=tk.X)
@@ -293,7 +299,7 @@ class LobbyMixin:
         # ------------------- TARJETA JUGADOR 2 (DERECHA) ---------------------
         # =====================================================================
         self.p2_booth = tk.Frame(booths_f, bg="#FFFFFF", highlightthickness=3, highlightbackground="#242E3B")
-        self.p2_booth.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(6, 0))
+        self.p2_booth.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         self.p2_h = tk.Frame(self.p2_booth, bg="#E45B47", height=36, padx=10)
         self.p2_h.pack(fill=tk.X)
@@ -450,10 +456,21 @@ class LobbyMixin:
         self.p2_lobby_dev_combo = ttk.Combobox(dev_f2, state="readonly", font=("Segoe UI", 8))
         self.p2_lobby_dev_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
         self.p2_lobby_dev_combo.bind("<<ComboboxSelected>>", self._on_p2_lobby_device_changed)
-        ttk.Button(
+        self.p2_dev_refresh_btn = ttk.Button(
             dev_f2, text="🔄", width=3, style="DSButton.TButton",
             command=self._manual_refresh_devices
-        ).pack(side=tk.RIGHT)
+        )
+        self.p2_dev_refresh_btn.pack(side=tk.RIGHT)
+        self.p2_room_source_lbl = tk.Label(
+            dev_f2,
+            text="🌐 Viene de la sala",
+            font=("Segoe UI", 8, "bold"),
+            bg="#EFF6FF",
+            fg="#0369A1",
+            padx=6,
+            pady=2,
+            anchor=tk.W,
+        )
 
         # Fila inferior de botones estilo Rivals of Aether para 2P
         p2_rivals_btns = tk.Frame(self.p2_active_body, bg="#FFFFFF")
@@ -2264,4 +2281,195 @@ class LobbyMixin:
             relief="solid", bd=2, padx=18, pady=4, cursor="hand2",
             command=dlg.destroy
         ).pack(side=tk.RIGHT)
+
+    # =========================================================================
+    # --- TARJETAS DINÁMICAS DE JUGADORES REMOTOS (SALA CO-OP 2P/3P/4P) ---
+    # =========================================================================
+    def _ensure_remote_lobby_card(self, slot: int):
+        """Crea (si no existe) la tarjeta en el menú principal para un invitado 3P/4P."""
+        slot = int(slot)
+        if slot in self.remote_lobby_cards:
+            return self.remote_lobby_cards[slot]
+
+        accent = "#6366F1" if slot == 3 else "#0EA5E9"
+        badge_bg = "#E0E7FF" if slot == 3 else "#E0F2FE"
+
+        booth = tk.Frame(self.booths_f, bg="#FFFFFF", highlightthickness=3, highlightbackground="#242E3B")
+        hdr = tk.Frame(booth, bg=accent, height=36, padx=8)
+        hdr.pack(fill=tk.X)
+        hdr.pack_propagate(False)
+
+        tk.Label(
+            hdr, text=f" {slot}P SALA ", font=("Segoe UI", 8, "bold"),
+            bg=badge_bg, fg="#1E293B", relief="solid", bd=1, padx=4, pady=1
+        ).pack(side=tk.LEFT, pady=5, padx=(0, 6))
+
+        title_lbl = tk.Label(
+            hdr, text=f"JUGADOR {slot}", font=("Segoe UI", 9, "bold"),
+            bg=accent, fg="#FFFFFF", anchor=tk.W
+        )
+        title_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
+
+        voice_badge = tk.Label(
+            hdr, text="🤫 Silencio", font=("Segoe UI", 8, "bold"),
+            bg="#1E293B", fg="#E2E8F0", padx=6, pady=1
+        )
+        voice_badge.pack(side=tk.RIGHT, pady=5)
+
+        body = tk.Frame(booth, bg="#FFFFFF", padx=10, pady=8)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        portrait_card = tk.Frame(body, bg="#1E293B", highlightthickness=2, highlightbackground="#0F172A")
+        portrait_card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+
+        avatar_box = tk.Frame(portrait_card, bg="#F8FBFF")
+        avatar_box.pack(fill=tk.BOTH, expand=True)
+
+        live_avatar = LiveAvatarPreview(
+            avatar_box, size=(220, 220), bg="#F8FBFF", border_color="#1E293B", accent_color=accent
+        )
+        live_avatar.bounce_enabled = self.global_config.get("bounce_enabled", True)
+        live_avatar.pack(fill=tk.BOTH, expand=True)
+
+        name_bar = tk.Frame(portrait_card, bg="#0F172A", height=34, padx=6, pady=3)
+        name_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        name_bar.pack_propagate(False)
+
+        def _cycle_char(delta):
+            names = list((self.profiles.get("player2") or {}).keys())
+            if not names:
+                return
+            d = self.remote_players.get(slot, {})
+            cur = d.get("character_name", "")
+            idx = names.index(cur) if cur in names else 0
+            nxt = names[(idx + delta) % len(names)]
+            self.set_remote_slot_character(slot, nxt)
+            self.push_guest_state_sync(slot)
+
+        tk.Button(
+            name_bar, text="◀", font=("Segoe UI", 8, "bold"), bg="#334155", fg="#FFFFFF",
+            relief="flat", padx=6, cursor="hand2", command=lambda: _cycle_char(-1)
+        ).pack(side=tk.LEFT)
+
+        char_lbl = tk.Label(name_bar, text="PERSONAJE", font=("Consolas", 11, "bold"), bg="#0F172A", fg="#FFFFFF")
+        char_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        tk.Button(
+            name_bar, text="▶", font=("Segoe UI", 8, "bold"), bg="#334155", fg="#FFFFFF",
+            relief="flat", padx=6, cursor="hand2", command=lambda: _cycle_char(1)
+        ).pack(side=tk.RIGHT)
+
+        # Barra de voz en vivo
+        meter = ttk.Progressbar(body, mode="determinate", maximum=100)
+        meter.pack(fill=tk.X, pady=(2, 6))
+
+        # Fuente fija: viene de la sala
+        src_row = tk.Frame(body, bg="#FFFFFF")
+        src_row.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(src_row, text="🔊 Fuente:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
+        tk.Label(
+            src_row, text="🌐 Viene de la sala", font=("Segoe UI", 8, "bold"),
+            bg="#EFF6FF", fg="#0369A1", padx=6, pady=2, anchor=tk.W
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Botones OBS + Expulsar
+        btns = tk.Frame(body, bg="#FFFFFF")
+        btns.pack(fill=tk.X)
+        tk.Button(
+            btns, text=f"🪟 Abrir OBS {slot}P", font=("Segoe UI", 9, "bold"),
+            bg=accent, fg="#FFFFFF", relief="solid", bd=2, padx=8, pady=4, cursor="hand2",
+            command=lambda s=slot: self.open_remote_avatar_window(s)
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        tk.Button(
+            btns, text="Expulsar", font=("Segoe UI", 9, "bold"),
+            bg="#EF4444", fg="#FFFFFF", relief="solid", bd=2, padx=8, pady=4, cursor="hand2",
+            command=lambda s=slot: self.kick_coop_guest(s, ban=False)
+        ).pack(side=tk.RIGHT)
+
+        card = {
+            "booth": booth,
+            "title_lbl": title_lbl,
+            "voice_badge": voice_badge,
+            "live_avatar": live_avatar,
+            "char_lbl": char_lbl,
+            "meter": meter,
+            "visible": False,
+        }
+        self.remote_lobby_cards[slot] = card
+        self._refresh_remote_card_avatar(slot)
+        return card
+
+    def _refresh_remote_card_avatar(self, slot: int):
+        card = getattr(self, "remote_lobby_cards", {}).get(int(slot))
+        if not card:
+            return
+        d = self._get_guest_slot_data(slot) or {}
+        imgs, motions, speeds = get_effective_pose_data(d, prefix="a2")
+        av = card["live_avatar"]
+        av.flip_x = bool(d.get("flip_x", False))
+        av.update_images(imgs, mode_4_states=(d.get("image_mode") == "4_states"), motions_map=motions, motion_speeds_map=speeds)
+        av.update_props_fast(d.get("props") or [])
+        card["char_lbl"].config(text=(d.get("character_name") or f"JUGADOR {slot}").upper())
+
+    def _sync_lobby_remote_cards(self, status: dict, voice_snap: dict):
+        """Sincroniza tarjetas dinámicas 3P/4P y la fuente de 2P en el menú principal."""
+        slots = status.get("slots", {})
+
+        # 2P: mostrar "🌐 Viene de la sala" cuando hay invitado en el slot 2
+        s2 = slots.get(2, {})
+        s2_conn = bool(s2.get("connected"))
+        if s2_conn != getattr(self, "_p2_room_connected", False):
+            self._p2_room_connected = s2_conn
+            if s2_conn:
+                try:
+                    self.p2_lobby_dev_combo.pack_forget()
+                    self.p2_dev_refresh_btn.pack_forget()
+                except Exception:
+                    pass
+                g_name = f"{s2.get('display_name', 'Invitado')}#{s2.get('tag', '')}".rstrip("#")
+                self.p2_room_source_lbl.config(text=f"🌐 Viene de la sala ({g_name})")
+                self.p2_room_source_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                if getattr(self, "p2_card_view", "blank") == "blank":
+                    self._set_card_view(2, "active")
+            else:
+                try:
+                    self.p2_room_source_lbl.pack_forget()
+                    self.p2_lobby_dev_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+                    self.p2_dev_refresh_btn.pack(side=tk.RIGHT)
+                except Exception:
+                    pass
+
+        # 3P y 4P: crear/mostrar/ocultar tarjetas dinámicas
+        for slot in (3, 4):
+            info = slots.get(slot, {})
+            connected = bool(info.get("connected"))
+            card = self.remote_lobby_cards.get(slot)
+            if connected:
+                if card is None:
+                    card = self._ensure_remote_lobby_card(slot)
+                if not card["visible"]:
+                    col = slot - 1  # 3P -> col 2, 4P -> col 3
+                    self.booths_f.grid_columnconfigure(col, weight=1, uniform="booth")
+                    card["booth"].grid(row=0, column=col, sticky="nsew", padx=(6, 0))
+                    card["visible"] = True
+                g_name = f"{info.get('display_name', f'Jugador {slot}')}#{info.get('tag', '')}".rstrip("#")
+                card["title_lbl"].config(text=g_name)
+
+                lvl = float(voice_snap.get(slot, 0.0))
+                d = self.remote_players.get(slot, {})
+                th = float(d.get("talk_threshold", 20) or 20)
+                sc = float(d.get("scream_threshold", 55) or 55)
+                talking = lvl >= th
+                screaming = (lvl >= sc) or bool(d.get("_forced_scream", False))
+                card["meter"]["value"] = max(0, min(100, lvl))
+                card["voice_badge"].config(
+                    text=("😱 Gritando" if screaming else ("🗣️ Hablando" if talking else "🤫 Silencio")),
+                    bg=("#DC2626" if screaming else ("#16A34A" if talking else "#1E293B")),
+                )
+                card["live_avatar"].set_talking(talking)
+                card["live_avatar"].set_screaming(screaming)
+            elif card is not None and card["visible"]:
+                card["booth"].grid_forget()
+                card["visible"] = False
+                self.booths_f.grid_columnconfigure(slot - 1, weight=0, uniform="")
 

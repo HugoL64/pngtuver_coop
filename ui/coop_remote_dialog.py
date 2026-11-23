@@ -35,16 +35,31 @@ class CoopRemoteDialogMixin:
         ry = self.root.winfo_y() + (self.root.winfo_height() - 680) // 2
         dlg.geometry(f"+{max(10, rx)}+{max(10, ry)}")
 
-        # Cabecera
-        hdr = tk.Frame(dlg, bg="#1E293B", padx=16, pady=12)
+        # Cabecera estilo Nintendo DS PictoChat
+        hdr = tk.Frame(dlg, bg="#1E293B", padx=16, pady=10)
         hdr.pack(fill=tk.X)
         tk.Label(
             hdr,
-            text="🌐  CO-OP REMOTO & 4 PLAYERS",
-            font=("Segoe UI", 13, "bold"),
+            text="💬  PICTOCHAT  //  SALA CO-OP",
+            font=("Consolas", 13, "bold"),
             bg="#1E293B",
             fg="#38BDF8",
         ).pack(side=tk.LEFT)
+
+        pills_frame = tk.Frame(hdr, bg="#1E293B")
+        pills_frame.pack(side=tk.LEFT, padx=(14, 0))
+        tk.Label(
+            pills_frame, text=" 1P HOST ", font=("Consolas", 8, "bold"),
+            bg="#FACC15", fg="#1E293B", relief="solid", bd=1, padx=4, pady=1
+        ).pack(side=tk.LEFT, padx=2)
+        slot_pills = {}
+        for s in VALID_SLOTS:
+            sp = tk.Label(
+                pills_frame, text=f" {s}P — ", font=("Consolas", 8, "bold"),
+                bg="#334155", fg="#94A3B8", relief="solid", bd=1, padx=4, pady=1
+            )
+            sp.pack(side=tk.LEFT, padx=2)
+            slot_pills[s] = sp
 
         panic_btn = tk.Button(
             hdr,
@@ -315,12 +330,29 @@ class CoopRemoteDialogMixin:
 
         adv_btn.config(command=toggle_advanced)
 
-        # Lobby de aprobación
-        lobby_card = tk.Frame(dlg, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=8)
+        # Entrada a la Sala estilo PictoChat (Lobby de aprobación)
+        lobby_card = tk.Frame(dlg, bg="#F8FAFC", highlightthickness=2, highlightbackground="#334155")
         lobby_card.pack(fill=tk.X, padx=14, pady=4)
-        tk.Label(lobby_card, text="🔔 Lobby de Aprobación (solicitudes entrantes)", font=("Segoe UI", 9, "bold"), bg="#FFFFFF", fg="#1E293B").pack(anchor=tk.W)
-        lobby_list_frame = tk.Frame(lobby_card, bg="#F8FAFC")
-        lobby_list_frame.pack(fill=tk.X, pady=(4, 0))
+        picto_bar = tk.Frame(lobby_card, bg="#334155", padx=10, pady=4)
+        picto_bar.pack(fill=tk.X)
+        tk.Label(
+            picto_bar,
+            text="💬 ENTRADA A LA SALA (PICTOCHAT)",
+            font=("Consolas", 9, "bold"),
+            bg="#334155",
+            fg="#F8FAFC",
+        ).pack(side=tk.LEFT)
+        picto_count_lbl = tk.Label(
+            picto_bar,
+            text="0 solicitudes",
+            font=("Consolas", 8, "bold"),
+            bg="#334155",
+            fg="#93C5FD",
+        )
+        picto_count_lbl.pack(side=tk.RIGHT)
+
+        lobby_list_frame = tk.Frame(lobby_card, bg="#F8FAFC", padx=8, pady=6)
+        lobby_list_frame.pack(fill=tk.X)
 
         # Slots 2P / 3P / 4P
         slots_card = tk.Frame(dlg, bg="#FFFFFF", highlightthickness=2, highlightbackground="#242E3B", padx=12, pady=8)
@@ -451,45 +483,119 @@ class CoopRemoteDialogMixin:
                         text=f"{slot}P: 🟢 {info['display_name']}#{info['tag']}{bg_note}",
                         fg="#15803D",
                     )
+                    slot_pills[slot].config(text=f" {slot}P ON ", bg="#16A34A", fg="#FFFFFF")
                 else:
                     slot_widgets[slot].config(text=f"{slot}P: ⚪ Libre", fg="#64748B")
+                    slot_pills[slot].config(text=f" {slot}P — ", bg="#334155", fg="#94A3B8")
 
-            # Solicitudes pendientes
+            # Feed estilo PictoChat (estado + conectados + solicitudes)
             for child in lobby_list_frame.winfo_children():
                 child.destroy()
             reqs = list(getattr(self, "_pending_join_requests", []))
-            if not reqs:
-                tk.Label(lobby_list_frame, text="Sin solicitudes pendientes.", font=("Segoe UI", 8), bg="#F8FAFC", fg="#64748B").pack(anchor=tk.W, pady=2)
+            picto_count_lbl.config(text=f"{len(reqs)} pendiente{'s' if len(reqs) != 1 else ''}")
+
+            if not self.coop_relay_client.connected:
+                tk.Label(
+                    lobby_list_frame,
+                    text="» Sala cerrada. Pulsa '▶ Abrir Sala' arriba para abrir el chat.",
+                    font=("Consolas", 8),
+                    bg="#E2E8F0",
+                    fg="#475569",
+                    anchor=tk.W,
+                    padx=8,
+                    pady=4,
+                ).pack(fill=tk.X, pady=1)
             else:
-                for req in reqs:
-                    rf = tk.Frame(lobby_list_frame, bg="#FFFFFF", pady=3, padx=6, highlightthickness=1, highlightbackground="#E2E8F0")
-                    rf.pack(fill=tk.X, pady=2)
+                connected_msgs = [
+                    f"» 🟢 {snap[s]['display_name']}#{snap[s]['tag']} entró a la sala ({s}P)"
+                    for s in VALID_SLOTS if snap[s]["connected"]
+                ]
+                if connected_msgs:
+                    for c_txt in connected_msgs:
+                        tk.Label(
+                            lobby_list_frame,
+                            text=c_txt,
+                            font=("Consolas", 8, "bold"),
+                            bg="#DCFCE7",
+                            fg="#166534",
+                            anchor=tk.W,
+                            padx=8,
+                            pady=2,
+                        ).pack(fill=tk.X, pady=1)
+                if not reqs:
                     tk.Label(
-                        rf,
-                        text=f"{req['display_name']}#{req['tag']}",
-                        font=("Segoe UI", 9, "bold"),
+                        lobby_list_frame,
+                        text="» Esperando que alguien toque la puerta con tu enlace...",
+                        font=("Consolas", 8),
                         bg="#FFFFFF",
-                        fg="#1E293B",
-                    ).pack(side=tk.LEFT)
+                        fg="#64748B",
+                        anchor=tk.W,
+                        padx=8,
+                        pady=4,
+                        highlightthickness=1,
+                        highlightbackground="#CBD5E1",
+                    ).pack(fill=tk.X, pady=2)
+
+            for req in reqs:
+                bubble = tk.Frame(
+                    lobby_list_frame,
+                    bg="#FFFFFF",
+                    highlightthickness=2,
+                    highlightbackground="#334155",
+                )
+                bubble.pack(fill=tk.X, pady=3)
+
+                b_left = tk.Frame(bubble, bg="#FFFFFF")
+                b_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+                tag_hdr = tk.Frame(b_left, bg="#E2E8F0", padx=6, pady=2)
+                tag_hdr.pack(fill=tk.X)
+                tk.Label(
+                    tag_hdr,
+                    text=f"📩 {req['display_name']}#{req['tag']}",
+                    font=("Consolas", 9, "bold"),
+                    bg="#E2E8F0",
+                    fg="#0F172A",
+                ).pack(side=tk.LEFT)
+
+                tk.Label(
+                    b_left,
+                    text="¡Hola! Quiero entrar a la sala.",
+                    font=("Segoe UI", 9),
+                    bg="#FFFFFF",
+                    fg="#1E293B",
+                    anchor=tk.W,
+                    padx=8,
+                    pady=4,
+                ).pack(fill=tk.X)
+
+                b_actions = tk.Frame(bubble, bg="#F1F5F9", padx=6, pady=6)
+                b_actions.pack(side=tk.RIGHT, fill=tk.Y)
+                tk.Button(
+                    b_actions,
+                    text="✕",
+                    font=("Consolas", 9, "bold"),
+                    bg="#EF4444",
+                    fg="#FFFFFF",
+                    relief="solid",
+                    bd=1,
+                    padx=6,
+                    cursor="hand2",
+                    command=lambda r=req: self.decide_join_request(r["req_id"], False, 2),
+                ).pack(side=tk.RIGHT, padx=2)
+                for target_s in VALID_SLOTS:
                     tk.Button(
-                        rf,
-                        text="Rechazar",
-                        font=("Segoe UI", 8, "bold"),
-                        bg="#EF4444",
+                        b_actions,
+                        text=f"✓ {target_s}P",
+                        font=("Consolas", 9, "bold"),
+                        bg="#16A34A",
                         fg="#FFFFFF",
+                        relief="solid",
+                        bd=1,
                         padx=6,
-                        command=lambda r=req: self.decide_join_request(r["req_id"], False, 2),
+                        cursor="hand2",
+                        command=lambda r=req, s=target_s: self.decide_join_request(r["req_id"], True, s),
                     ).pack(side=tk.RIGHT, padx=2)
-                    for target_s in VALID_SLOTS:
-                        tk.Button(
-                            rf,
-                            text=f"Aceptar {target_s}P",
-                            font=("Segoe UI", 8, "bold"),
-                            bg="#16A34A",
-                            fg="#FFFFFF",
-                            padx=6,
-                            command=lambda r=req, s=target_s: self.decide_join_request(r["req_id"], True, s),
-                        ).pack(side=tk.RIGHT, padx=2)
 
             dlg.after(400, refresh_ui)
 

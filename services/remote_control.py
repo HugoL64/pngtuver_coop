@@ -177,6 +177,8 @@ class RemoteControlMixin:
         for role in ("idle", "idle_blink", "talk", "talk_blink", "scream"):
             d[f"a2_{role}"] = prof.get(f"a2_{role}", self.default_assets.get(f"a2_{role}", ""))
         self._sync_remote_slot_window(slot)
+        if hasattr(self, "_refresh_remote_card_avatar"):
+            self._refresh_remote_card_avatar(slot)
 
     def _sync_remote_slot_window(self, slot):
         slot = int(slot)
@@ -321,6 +323,9 @@ class RemoteControlMixin:
                     sc = float(d.get("scream_threshold", 55) or 55)
                     win.set_talking(lvl >= th)
                     win.set_screaming((lvl >= sc) or bool(d.get("_forced_scream", False)))
+
+            if hasattr(self, "_sync_lobby_remote_cards"):
+                self._sync_lobby_remote_cards(status, voice_snap)
         try:
             self._guest_tick_id = self.root.after(33, self._guest_tick)
         except Exception:

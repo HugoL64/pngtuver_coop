@@ -1,0 +1,26 @@
+name: Sync main to pngtuber_coop_online
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge main into pngtuber_coop_online
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout pngtuber_coop_online
+          git merge --no-edit origin/main
+          git push origin pngtuber_coop_online

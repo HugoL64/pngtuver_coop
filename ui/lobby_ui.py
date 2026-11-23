@@ -8,7 +8,7 @@ import time
 
 from core.app_constants import CHARACTERS_DIR, log_debug, ScrollableFrame
 from core.character_pack import import_character_zip
-from core.emotions import default_emotion_slots
+from core.emotions import default_emotion_slots, get_effective_pose_data
 from ui.live_avatar_preview import LiveAvatarPreview
 from core.hotkeys import MODIFIER_VKS, current_modifiers, format_hotkey, pretty_key_label
 
@@ -2359,6 +2359,23 @@ class LobbyMixin:
             relief="flat", padx=6, cursor="hand2", command=lambda: _cycle_char(1)
         ).pack(side=tk.RIGHT)
 
+        # Selector de personaje para el invitado ("¿Con qué personaje lo meto?")
+        char_row = tk.Frame(body, bg="#FFFFFF")
+        char_row.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(char_row, text="👤 Personaje:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
+        char_names = list((self.profiles.get("player2") or {}).keys())
+        char_var = tk.StringVar(value=self.remote_players.get(slot, {}).get("character_name", ""))
+        char_combo = ttk.Combobox(char_row, textvariable=char_var, values=char_names, state="readonly", font=("Segoe UI", 8))
+        char_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        def _on_combo_char(_ev=None):
+            sel = char_var.get()
+            if sel:
+                self.set_remote_slot_character(slot, sel)
+                self.push_guest_state_sync(slot)
+
+        char_combo.bind("<<ComboboxSelected>>", _on_combo_char)
+
         # Barra de voz en vivo
         meter = ttk.Progressbar(body, mode="determinate", maximum=100)
         meter.pack(fill=tk.X, pady=(2, 6))
@@ -2392,6 +2409,8 @@ class LobbyMixin:
             "voice_badge": voice_badge,
             "live_avatar": live_avatar,
             "char_lbl": char_lbl,
+            "char_var": char_var,
+            "char_combo": char_combo,
             "meter": meter,
             "visible": False,
         }
@@ -2409,7 +2428,12 @@ class LobbyMixin:
         av.flip_x = bool(d.get("flip_x", False))
         av.update_images(imgs, mode_4_states=(d.get("image_mode") == "4_states"), motions_map=motions, motion_speeds_map=speeds)
         av.update_props_fast(d.get("props") or [])
-        card["char_lbl"].config(text=(d.get("character_name") or f"JUGADOR {slot}").upper())
+        c_name = d.get("character_name") or f"JUGADOR {slot}"
+        card["char_lbl"].config(text=c_name.upper())
+        if card.get("char_var") is not None:
+            card["char_var"].set(d.get("character_name", ""))
+        if card.get("char_combo") is not None:
+            card["char_combo"]["values"] = list((self.profiles.get("player2") or {}).keys())
 
     def _sync_lobby_remote_cards(self, status: dict, voice_snap: dict):
         """Sincroniza tarjetas dinámicas 3P/4P y la fuente de 2P en el menú principal."""

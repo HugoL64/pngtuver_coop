@@ -325,7 +325,10 @@ class RemoteControlMixin:
                     win.set_screaming((lvl >= sc) or bool(d.get("_forced_scream", False)))
 
             if hasattr(self, "_sync_lobby_remote_cards"):
-                self._sync_lobby_remote_cards(status, voice_snap)
+                try:
+                    self._sync_lobby_remote_cards(status, voice_snap)
+                except Exception as exc:
+                    log_debug(f"[REMOTE] Error actualizando tarjetas del lobby: {exc}")
         try:
             self._guest_tick_id = self.root.after(33, self._guest_tick)
         except Exception:

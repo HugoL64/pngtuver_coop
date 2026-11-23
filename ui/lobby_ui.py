@@ -2319,7 +2319,57 @@ class LobbyMixin:
         body = tk.Frame(booth, bg="#FFFFFF", padx=10, pady=8)
         body.pack(fill=tk.BOTH, expand=True)
 
-        portrait_card = tk.Frame(body, bg="#1E293B", highlightthickness=2, highlightbackground="#0F172A")
+        # Vista 1: Tarjeta en blanco ("¿Con qué personaje quieres abrir a 3P/4P?")
+        blank_frame = tk.Frame(body, bg="#F8FAFC", highlightthickness=2, highlightbackground="#94A3B8", padx=14, pady=18)
+        tk.Label(blank_frame, text="👤❔", font=("Segoe UI", 40), bg="#F8FAFC", fg=accent).pack(pady=(16, 8))
+        tk.Label(
+            blank_frame,
+            text=f"TARJETA {slot}P EN BLANCO",
+            font=("Segoe UI", 12, "bold"),
+            bg="#F8FAFC",
+            fg="#1E293B",
+        ).pack(pady=(0, 4))
+        tk.Label(
+            blank_frame,
+            text=f"Elige con qué personaje quieres abrir\nal Jugador {slot} en la sala.",
+            font=("Segoe UI", 9),
+            bg="#F8FAFC",
+            fg="#64748B",
+            justify=tk.CENTER,
+        ).pack(pady=(0, 12))
+
+        # Lista rápida de personajes dentro de la tarjeta en blanco
+        list_box = tk.Frame(blank_frame, bg="#FFFFFF", highlightthickness=1, highlightbackground="#CBD5E1")
+        list_box.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        def _populate_blank_list():
+            for ch_w in list_box.winfo_children():
+                ch_w.destroy()
+            names = list((self.profiles.get("player2") or {}).keys())
+            if not names:
+                tk.Label(list_box, text="No hay personajes guardados.", font=("Segoe UI", 8), bg="#FFFFFF", fg="#64748B").pack(pady=10)
+                return
+            for cname in names[:8]:
+                tk.Button(
+                    list_box,
+                    text=f"👤 {cname}",
+                    font=("Segoe UI", 9, "bold"),
+                    bg="#F1F5F9",
+                    fg="#0F172A",
+                    activebackground=accent,
+                    activeforeground="#FFFFFF",
+                    relief="flat",
+                    anchor=tk.W,
+                    padx=10,
+                    pady=4,
+                    cursor="hand2",
+                    command=lambda n=cname: _pick_char(n),
+                ).pack(fill=tk.X, padx=4, pady=2)
+
+        # Vista 2: Tarjeta activa (mismas opciones que P1/P2, con fuente "Viene de la sala")
+        active_frame = tk.Frame(body, bg="#FFFFFF")
+
+        portrait_card = tk.Frame(active_frame, bg="#1E293B", highlightthickness=2, highlightbackground="#0F172A")
         portrait_card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
 
         avatar_box = tk.Frame(portrait_card, bg="#F8FBFF")
@@ -2343,8 +2393,7 @@ class LobbyMixin:
             cur = d.get("character_name", "")
             idx = names.index(cur) if cur in names else 0
             nxt = names[(idx + delta) % len(names)]
-            self.set_remote_slot_character(slot, nxt)
-            self.push_guest_state_sync(slot)
+            _pick_char(nxt)
 
         tk.Button(
             name_bar, text="◀", font=("Segoe UI", 8, "bold"), bg="#334155", fg="#FFFFFF",
@@ -2359,29 +2408,42 @@ class LobbyMixin:
             relief="flat", padx=6, cursor="hand2", command=lambda: _cycle_char(1)
         ).pack(side=tk.RIGHT)
 
-        # Selector de personaje para el invitado ("¿Con qué personaje lo meto?")
-        char_row = tk.Frame(body, bg="#FFFFFF")
-        char_row.pack(fill=tk.X, pady=(0, 4))
-        tk.Label(char_row, text="👤 Personaje:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
-        char_names = list((self.profiles.get("player2") or {}).keys())
-        char_var = tk.StringVar(value=self.remote_players.get(slot, {}).get("character_name", ""))
-        char_combo = ttk.Combobox(char_row, textvariable=char_var, values=char_names, state="readonly", font=("Segoe UI", 8))
-        char_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Emociones rápidas (1..5) igual que P1/P2
+        em_bar = tk.Frame(active_frame, bg="#FFFFFF")
+        em_bar.pack(fill=tk.X, pady=(2, 4))
+        tk.Label(em_bar, text="Emoción:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
 
-        def _on_combo_char(_ev=None):
-            sel = char_var.get()
-            if sel:
-                self.set_remote_slot_character(slot, sel)
-                self.push_guest_state_sync(slot)
+        def _set_remote_em(em_idx):
+            d = self.remote_players.get(slot)
+            if d is None:
+                return
+            d["active_emotion"] = int(em_idx)
+            self._sync_remote_slot_window(slot)
+            self._refresh_remote_card_avatar(slot)
+            self.push_guest_state_sync(slot)
 
-        char_combo.bind("<<ComboboxSelected>>", _on_combo_char)
+        for em_i in range(5):
+            tk.Button(
+                em_bar, text=str(em_i + 1), font=("Segoe UI", 7, "bold"),
+                bg="#F1F5F9", fg="#334155", relief="solid", bd=1, padx=6, pady=1, cursor="hand2",
+                command=lambda idx=em_i: _set_remote_em(idx)
+            ).pack(side=tk.LEFT, padx=2)
 
-        # Barra de voz en vivo
-        meter = ttk.Progressbar(body, mode="determinate", maximum=100)
+        # Barra de voz en vivo + info de umbrales
+        meter_info = tk.Label(
+            active_frame,
+            text="🎤 Voz en sala",
+            font=("Segoe UI", 8, "bold"),
+            bg="#FFFFFF",
+            fg="#475569",
+            anchor=tk.W,
+        )
+        meter_info.pack(fill=tk.X)
+        meter = ttk.Progressbar(active_frame, mode="determinate", maximum=100)
         meter.pack(fill=tk.X, pady=(2, 6))
 
         # Fuente fija: viene de la sala
-        src_row = tk.Frame(body, bg="#FFFFFF")
+        src_row = tk.Frame(active_frame, bg="#FFFFFF")
         src_row.pack(fill=tk.X, pady=(0, 6))
         tk.Label(src_row, text="🔊 Fuente:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#475569").pack(side=tk.LEFT, padx=(0, 4))
         tk.Label(
@@ -2389,19 +2451,40 @@ class LobbyMixin:
             bg="#EFF6FF", fg="#0369A1", padx=6, pady=2, anchor=tk.W
         ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Botones OBS + Expulsar
-        btns = tk.Frame(body, bg="#FFFFFF")
+        # Botones inferiores (Cambiar personaje | Abrir OBS | Expulsar)
+        btns = tk.Frame(active_frame, bg="#FFFFFF")
         btns.pack(fill=tk.X)
+
+        def _show_blank():
+            active_frame.pack_forget()
+            _populate_blank_list()
+            blank_frame.pack(fill=tk.BOTH, expand=True)
+
+        def _pick_char(cname):
+            self.set_remote_slot_character(slot, cname)
+            self.push_guest_state_sync(slot)
+            blank_frame.pack_forget()
+            active_frame.pack(fill=tk.BOTH, expand=True)
+
         tk.Button(
-            btns, text=f"🪟 Abrir OBS {slot}P", font=("Segoe UI", 9, "bold"),
-            bg=accent, fg="#FFFFFF", relief="solid", bd=2, padx=8, pady=4, cursor="hand2",
+            btns, text="👤 Cambiar", font=("Segoe UI", 8, "bold"),
+            bg="#16A34A", fg="#FFFFFF", relief="solid", bd=2, padx=6, pady=4, cursor="hand2",
+            command=_show_blank
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        tk.Button(
+            btns, text=f"🪟 OBS {slot}P", font=("Segoe UI", 8, "bold"),
+            bg=accent, fg="#FFFFFF", relief="solid", bd=2, padx=6, pady=4, cursor="hand2",
             command=lambda s=slot: self.open_remote_avatar_window(s)
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        ).pack(side=tk.LEFT, padx=3)
         tk.Button(
-            btns, text="Expulsar", font=("Segoe UI", 9, "bold"),
-            bg="#EF4444", fg="#FFFFFF", relief="solid", bd=2, padx=8, pady=4, cursor="hand2",
+            btns, text="Expulsar", font=("Segoe UI", 8, "bold"),
+            bg="#EF4444", fg="#FFFFFF", relief="solid", bd=2, padx=6, pady=4, cursor="hand2",
             command=lambda s=slot: self.kick_coop_guest(s, ban=False)
-        ).pack(side=tk.RIGHT)
+        ).pack(side=tk.RIGHT, padx=(3, 0))
+
+        # Mostrar primero la tarjeta en blanco para preguntar con qué personaje abrirlo
+        _populate_blank_list()
+        blank_frame.pack(fill=tk.BOTH, expand=True)
 
         card = {
             "booth": booth,
@@ -2409,8 +2492,6 @@ class LobbyMixin:
             "voice_badge": voice_badge,
             "live_avatar": live_avatar,
             "char_lbl": char_lbl,
-            "char_var": char_var,
-            "char_combo": char_combo,
             "meter": meter,
             "visible": False,
         }
@@ -2423,17 +2504,11 @@ class LobbyMixin:
         if not card:
             return
         d = self._get_guest_slot_data(slot) or {}
-        imgs, motions, speeds = get_effective_pose_data(d, prefix="a2")
         av = card["live_avatar"]
         av.flip_x = bool(d.get("flip_x", False))
-        av.update_images(imgs, mode_4_states=(d.get("image_mode") == "4_states"), motions_map=motions, motion_speeds_map=speeds)
-        av.update_props_fast(d.get("props") or [])
+        av.set_character(d, prefix="a2")
         c_name = d.get("character_name") or f"JUGADOR {slot}"
         card["char_lbl"].config(text=c_name.upper())
-        if card.get("char_var") is not None:
-            card["char_var"].set(d.get("character_name", ""))
-        if card.get("char_combo") is not None:
-            card["char_combo"]["values"] = list((self.profiles.get("player2") or {}).keys())
 
     def _sync_lobby_remote_cards(self, status: dict, voice_snap: dict):
         """Sincroniza tarjetas dinámicas 3P/4P y la fuente de 2P en el menú principal."""
@@ -2490,8 +2565,7 @@ class LobbyMixin:
                     text=("😱 Gritando" if screaming else ("🗣️ Hablando" if talking else "🤫 Silencio")),
                     bg=("#DC2626" if screaming else ("#16A34A" if talking else "#1E293B")),
                 )
-                card["live_avatar"].set_talking(talking)
-                card["live_avatar"].set_screaming(screaming)
+                card["live_avatar"].update_state(talking, screaming, audio_level=lvl, talk_threshold=th)
             elif card is not None and card["visible"]:
                 card["booth"].grid_forget()
                 card["visible"] = False

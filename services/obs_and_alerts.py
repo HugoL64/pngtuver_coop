@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 import random
+import secrets
 import time
 
 from core.app_constants import log_debug, ScrollableFrame
@@ -19,12 +20,14 @@ class ObsAndAlertsMixin:
         cfg.setdefault("enabled", False)
         cfg.setdefault("port", 8765)
         cfg.setdefault("rules", [])
+        if not cfg.get("auth_token"):
+            cfg["auth_token"] = secrets.token_urlsafe(24)
         return cfg
 
     def _sync_twitch_alert_server(self):
         cfg = self._get_twitch_cfg()
         if cfg.get("enabled", False):
-            ok = self.twitch_alert_server.start(cfg.get("port", 8765))
+            ok = self.twitch_alert_server.start(cfg.get("port", 8765), auth_token=cfg.get("auth_token"))
             if ok:
                 log_debug(f"[TWITCH] Receptor local escuchando en http://127.0.0.1:{self.twitch_alert_server.port}")
             else:
@@ -277,12 +280,12 @@ class ObsAndAlertsMixin:
                 "   Elige qué evento quieres (ej. follow, sub, bits, raid o el nombre de un canje)\n"
                 "   y qué hará tu personaje (cambiar a otra emoción/personaje o gritar unos segundos).\n"
                 "   Usa '▶ Probar' para ver cómo se ve sin esperar una alerta real.\n\n"
-                "3️⃣ COPIA EL ENLACE Y PÉGALO EN TU PROGRAMA DE ALERTAS\n"
-                "   Cada regla tiene su botón '📋 Copiar enlace'. Cópialo y pégalo según uses:\n"
-                "   • Streamer.bot: En tu acción → Add Sub-Action → Core → Network → Fetch URL → pega el enlace.\n"
-                "   • Mix It Up: En tu comando/evento → Action: Web Request → pega el enlace.\n"
-                "   • SAMMI: En tu botón → HTTP Request (GET) → pega el enlace.\n\n"
-                "💡 TRUCO: Si pegas ese enlace en Chrome/Edge y presionas Enter, ¡también dispara la alerta!"
+                "3️⃣ COPIA EL ENLACE Y TU TOKEN EN TU PROGRAMA DE ALERTAS\n"
+                "   El servidor local exige método POST y la cabecera X-Remote-Token (para protegerte de sitios web externos):\n"
+                "   • Streamer.bot: Add Sub-Action → Core → Network → Fetch URL (Method: POST, Header: X-Remote-Token).\n"
+                "   • Mix It Up: Action → Web Request (POST) con cabecera X-Remote-Token.\n"
+                "   • SAMMI: HTTP Request (POST) con cabecera X-Remote-Token.\n\n"
+                "💡 El botón '📋 Copiar enlace de esta alerta' copia el comando listo para usar o probar en PowerShell/curl."
             )
             tk.Label(
                 help_win, text=guide_txt, font=("Segoe UI", 9),
@@ -358,6 +361,33 @@ class ObsAndAlertsMixin:
             bg="#3671C6", fg="#FFFFFF", relief="solid", bd=1, padx=8, pady=1,
             cursor="hand2", command=apply_server
         ).pack(side=tk.LEFT)
+
+        token_row = tk.Frame(srv_card, bg="#F8FAFC", padx=10, pady=6, highlightthickness=1, highlightbackground="#CBD5E1")
+        token_row.pack(fill=tk.X, pady=(6, 0))
+        tk.Label(token_row, text="Token de acceso (cabecera X-Remote-Token):", font=("Segoe UI", 8), bg="#F8FAFC", fg="#475569").pack(side=tk.LEFT)
+        token_var = tk.StringVar(value=cfg.get("auth_token", ""))
+        token_ent = tk.Entry(token_row, textvariable=token_var, width=28, font=("Consolas", 8), relief="solid", bd=1, show="•", state="readonly")
+        token_ent.pack(side=tk.LEFT, padx=6)
+        show_tok_var = tk.BooleanVar(value=False)
+
+        def _toggle_tok():
+            token_ent.config(show="" if show_tok_var.get() else "•")
+
+        def _copy_tok():
+            dlg.clipboard_clear()
+            dlg.clipboard_append(cfg.get("auth_token", ""))
+            messagebox.showinfo("Token copiado", "Token copiado al portapapeles.\nÚsalo en la cabecera HTTP: X-Remote-Token", parent=dlg)
+
+        def _rotate_tok():
+            new_tok = self.twitch_alert_server.rotate_token()
+            cfg["auth_token"] = new_tok
+            token_var.set(new_tok)
+            self.save_global_config()
+            messagebox.showinfo("Token rotado", "Se generó un nuevo token.\nActualiza la cabecera X-Remote-Token en Streamer.bot / SAMMI.", parent=dlg)
+
+        tk.Checkbutton(token_row, text="👁", variable=show_tok_var, bg="#F8FAFC", command=_toggle_tok, cursor="hand2").pack(side=tk.LEFT)
+        tk.Button(token_row, text="📋 Copiar token", font=("Segoe UI", 8, "bold"), bg="#E0F2FE", fg="#0369A1", relief="solid", bd=1, padx=8, pady=1, cursor="hand2", command=_copy_tok).pack(side=tk.LEFT, padx=(6, 4))
+        tk.Button(token_row, text="🔄 Rotar", font=("Segoe UI", 8, "bold"), bg="#FEF3C7", fg="#92400E", relief="solid", bd=1, padx=8, pady=1, cursor="hand2", command=_rotate_tok).pack(side=tk.LEFT)
 
         update_status_label()
 
@@ -558,10 +588,12 @@ class ObsAndAlertsMixin:
                     fn()
                     ev_name = r.get("event") or "sub"
                     port_num = cfg.get("port", 8765)
+                    tok = cfg.get("auth_token") or self.twitch_alert_server.auth_token
                     link = f"http://127.0.0.1:{port_num}/trigger?event={ev_name}"
+                    snippet = f'curl -X POST "{link}" -H "X-Remote-Token: {tok}"'
                     dlg.clipboard_clear()
-                    dlg.clipboard_append(link)
-                    btn.config(text="✅ ¡Enlace copiado!")
+                    dlg.clipboard_append(snippet)
+                    btn.config(text="✅ ¡Comando copiado!")
                     dlg.after(1400, lambda b=btn: b.config(text="📋 Copiar enlace de esta alerta") if b.winfo_exists() else None)
 
                 copy_rule_btn.config(command=copy_rule_link)

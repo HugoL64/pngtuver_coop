@@ -2,6 +2,8 @@
 
 import asyncio
 import functools
+import hashlib
+import hmac
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import mimetypes
 import os
@@ -22,10 +24,23 @@ from relay_server import RelayServer
 
 _TRYCLOUDFLARE_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
 
-_CLOUDFLARED_URLS = {
-    "win32": "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe",
-    "linux": "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
+_CLOUDFLARED_VERSION = "2026.11.1"
+_CLOUDFLARED_RELEASES = {
+    "win32": {
+        "url": f"https://github.com/cloudflare/cloudflared/releases/download/{_CLOUDFLARED_VERSION}/cloudflared-windows-amd64.exe",
+        "sha256": "341deda3db5ec498a0482254d6c38c0b7cf01a30c37bb5dd95d2216d08955e35",
+    },
+    "linux": {
+        "url": f"https://github.com/cloudflare/cloudflared/releases/download/{_CLOUDFLARED_VERSION}/cloudflared-linux-amd64",
+        "sha256": "97bb3b02d23a5980fc9c15a1a270e692da1923f103f920d5b16d4931d5ab55e7",
+    },
 }
+
+_WEB_GUEST_CSP = (
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+    "connect-src wss: ws://127.0.0.1:* ws://localhost:*; "
+    "base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'"
+)
 
 
 class _QuietHTTPHandler(SimpleHTTPRequestHandler):
@@ -75,6 +90,9 @@ def _make_static_http_hook(web_dir: str):
                 ("Content-Length", str(len(body))),
                 ("Cache-Control", "no-store"),
                 ("X-Content-Type-Options", "nosniff"),
+                ("X-Frame-Options", "DENY"),
+                ("Referrer-Policy", "no-referrer"),
+                ("Content-Security-Policy", _WEB_GUEST_CSP),
             ]
         )
         return Response(200, "OK", headers, body)
@@ -139,7 +157,7 @@ class LocalCoopHost:
                 self._relay_stop_event = stop_ev
 
                 async def _serve():
-                    srv = RelayServer()
+                    srv = RelayServer(local_host_only=True)
                     self._relay_srv_obj = srv
                     if self.tunnel_url:
                         srv.allow_origin(self.tunnel_url)
@@ -150,6 +168,9 @@ class LocalCoopHost:
                             int(port),
                             compression=None,
                             process_request=http_hook,
+                            max_size=16384,
+                            open_timeout=5.0,
+                            close_timeout=2.0,
                         ) as ws_srv:
                             self._relay_server = ws_srv
                             state["ok"] = True
@@ -267,11 +288,13 @@ class LocalCoopHost:
         return None
 
     def _download_cloudflared(self) -> str:
-        """Descarga el binario oficial de `cloudflared` a `DATA_DIR/bin/`."""
+        """Descarga el binario oficial fijado de `cloudflared` y verifica su SHA-256."""
         plat = "win32" if sys.platform.startswith("win") else "linux"
-        url = _CLOUDFLARED_URLS.get(plat)
-        if not url:
+        rel_info = _CLOUDFLARED_RELEASES.get(plat)
+        if not rel_info:
             raise RuntimeError(f"Descarga automática de cloudflared no soportada en {sys.platform}")
+        url = rel_info["url"]
+        expected_sha256 = rel_info["sha256"]
 
         bin_dir = os.path.join(DATA_DIR, "bin")
         os.makedirs(bin_dir, exist_ok=True)
@@ -282,23 +305,52 @@ class LocalCoopHost:
         self.download_bytes = 0
         self.download_total = 0
 
-        log_debug(f"[TUNNEL] Descargando cloudflared desde GitHub oficial hacia {dest}...")
+        log_debug(f"[TUNNEL] Descargando cloudflared {_CLOUDFLARED_VERSION} desde GitHub oficial hacia {dest}...")
         req = urllib.request.Request(url, headers={"User-Agent": "PNGTuberCoop"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
+        max_bytes = 150 * 1024 * 1024
+        min_bytes = 1 * 1024 * 1024
+        hasher = hashlib.sha256()
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            final_url = urlparse(resp.geturl())
+            if final_url.scheme != "https":
+                raise RuntimeError("Redirección no segura al descargar cloudflared")
             try:
                 self.download_total = int(resp.headers.get("Content-Length") or 0)
             except Exception:
                 self.download_total = 0
-            while True:
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                out.write(chunk)
-                self.download_bytes += len(chunk)
+            if self.download_total > max_bytes:
+                raise RuntimeError("El binario remoto excede el tamaño máximo esperado")
+            magic = b""
+            with open(tmp, "wb") as out:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    if len(magic) < 4:
+                        magic += chunk[: 4 - len(magic)]
+                    self.download_bytes += len(chunk)
+                    if self.download_bytes > max_bytes:
+                        raise RuntimeError("Descarga abortada por exceso de tamaño")
+                    hasher.update(chunk)
+                    out.write(chunk)
+        expected_magic = b"MZ" if plat == "win32" else b"\x7fELF"
+        if self.download_bytes < min_bytes or not magic.startswith(expected_magic):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise RuntimeError("El archivo descargado de cloudflared no es un ejecutable válido")
+        actual_sha256 = hasher.hexdigest().lower()
+        if not hmac.compare_digest(actual_sha256, expected_sha256):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise RuntimeError("Verificación SHA-256 fallida para cloudflared")
         os.replace(tmp, dest)
         if not sys.platform.startswith("win"):
             os.chmod(dest, 0o755)
-        log_debug(f"[TUNNEL] cloudflared guardado en {dest}")
+        log_debug(f"[TUNNEL] cloudflared {_CLOUDFLARED_VERSION} verificado (SHA-256 OK) y guardado en {dest}")
         return dest
 
     def start_tunnel_async(self, local_port: int = 8766, auto_download: bool = True):

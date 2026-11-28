@@ -1,12 +1,26 @@
 import json
 import os
+import shutil
+import stat
 import zipfile
 from core.emotions import BASE_POSE_ROLES, default_emotion_slots
+from core.safe_paths import is_within, safe_join_within
+
+MAX_ZIP_FILES = 200
+MAX_ZIP_FILE_BYTES = 25 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 100 * 1024 * 1024
+MAX_JSON_BYTES = 1 * 1024 * 1024
+_COPY_CHUNK = 65536
 
 
-def _safe_rel_add(zf, abs_path, arc_name):
-    if abs_path and os.path.isfile(abs_path):
+def _safe_rel_add(zf, abs_path, arc_name, base_dir, seen_arcs=None):
+    """Añade al ZIP solo archivos reales dentro de la carpeta del personaje, sin duplicar rutas."""
+    if seen_arcs is not None and arc_name in seen_arcs:
+        return
+    if abs_path and os.path.isfile(abs_path) and is_within(base_dir, abs_path):
         zf.write(abs_path, arc_name)
+        if seen_arcs is not None:
+            seen_arcs.add(arc_name)
 
 
 def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
@@ -29,6 +43,8 @@ def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
                     if fn.endswith(".tmp"):
                         continue
                     full_p = os.path.join(root_dir, fn)
+                    if not is_within(char_folder, full_p):
+                        continue  # p. ej. enlaces simbólicos que apuntan fuera
                     rel_p = os.path.relpath(full_p, char_folder).replace("\\", "/")
                     zf.write(full_p, rel_p)
         return out_zip_path
@@ -55,12 +71,12 @@ def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
             if slot_idx > 0:
                 rel_em = (sl.get("images_rel") or {}).get(r)
                 if rel_em:
-                    cand = os.path.join(char_folder, rel_em)
-                    if os.path.isfile(cand):
+                    cand = safe_join_within(char_folder, rel_em)
+                    if cand and os.path.isfile(cand):
                         chosen_abs = cand
                 if chosen_abs is None:
                     abs_em = (sl.get("images") or {}).get(r)
-                    if abs_em and os.path.isfile(abs_em):
+                    if abs_em and os.path.isfile(abs_em) and is_within(char_folder, abs_em):
                         chosen_abs = abs_em
                 if (sl.get("motions") or {}).get(r):
                     new_motions[r] = sl["motions"][r]
@@ -76,13 +92,14 @@ def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
             if chosen_abs and os.path.isfile(chosen_abs):
                 ext = os.path.splitext(chosen_abs)[1].lower()
                 arc = f"{r}{ext}"
-                _safe_rel_add(zf, chosen_abs, arc)
+                _safe_rel_add(zf, chosen_abs, arc, char_folder)
                 new_exprs[r] = arc
 
         export_meta["motions"] = new_motions
         export_meta["motion_speeds"] = new_speeds
         export_meta["expressions"] = new_exprs
 
+        seen_arcs = set()
         # 2. Subcarpetas compartidas (props, mouths, eyes) y extra_expressions si es slot 0
         shared_dirs = ["props", "mouths", "eyes"]
         for sd in shared_dirs:
@@ -91,16 +108,19 @@ def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
                 for root_dir, _dirs, files in os.walk(sd_path):
                     for fn in files:
                         full_p = os.path.join(root_dir, fn)
+                        if not is_within(char_folder, full_p):
+                            continue
                         rel_p = os.path.relpath(full_p, char_folder).replace("\\", "/")
-                        zf.write(full_p, rel_p)
+                        _safe_rel_add(zf, full_p, rel_p, char_folder, seen_arcs)
 
         if slot_idx == 0:
             for ex in meta.get("extra_expressions") or []:
-                rel_ex = ex.get("file_rel")
+                rel_ex = ex.get("file_rel") if isinstance(ex, dict) else None
                 if rel_ex:
-                    cand = os.path.join(char_folder, rel_ex)
-                    if os.path.isfile(cand):
-                        _safe_rel_add(zf, cand, rel_ex.replace("\\", "/"))
+                    cand = safe_join_within(char_folder, rel_ex)
+                    if cand and os.path.isfile(cand):
+                        arc_ex = os.path.relpath(cand, char_folder).replace("\\", "/")
+                        _safe_rel_add(zf, cand, arc_ex, char_folder, seen_arcs)
         else:
             export_meta["extra_expressions"] = []
 
@@ -110,15 +130,18 @@ def export_character_zip(char_folder, char_name, out_zip_path, slot_idx=None):
 
 
 def import_character_zip(zip_path, characters_dir):
-    """Importa un archivo .zip de personaje a personajes/<Nombre>/ de forma segura."""
+    """Importa un archivo .zip de personaje a personajes/<Nombre>/ con límites anti-bomba y anti-traversal."""
     os.makedirs(characters_dir, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zf:
-        members = zf.namelist()
-        if not members:
+        infos = [i for i in zf.infolist() if not i.is_dir() and not i.filename.startswith("__MACOSX")]
+        if not infos:
             raise ValueError("El archivo ZIP está vacío.")
+        if len(infos) > MAX_ZIP_FILES:
+            raise ValueError(f"El ZIP excede el máximo de {MAX_ZIP_FILES} archivos.")
+        members = [i.filename for i in infos]
 
         # Detectar si viene envuelto en una sola carpeta raíz
-        top_dirs = {m.split("/")[0] for m in members if "/" in m and not m.startswith("__MACOSX")}
+        top_dirs = {m.replace("\\", "/").split("/")[0] for m in members if "/" in m.replace("\\", "/")}
         has_root_json = "character.json" in members
         strip_prefix = ""
         if not has_root_json and len(top_dirs) == 1:
@@ -127,19 +150,21 @@ def import_character_zip(zip_path, characters_dir):
                 strip_prefix = f"{only_dir}/"
 
         base_name = os.path.splitext(os.path.basename(zip_path))[0].strip() or "Personaje"
-        meta_bytes = None
         meta_arc = f"{strip_prefix}character.json"
-        if meta_arc in members:
+        meta_info = next((i for i in infos if i.filename == meta_arc), None)
+        if meta_info is not None:
             try:
-                meta_bytes = zf.read(meta_arc)
-                meta_json = json.loads(meta_bytes.decode("utf-8"))
-                if meta_json.get("name"):
-                    base_name = str(meta_json["name"]).strip()
+                if meta_info.file_size <= MAX_JSON_BYTES:
+                    meta_bytes = zf.read(meta_arc)[: MAX_JSON_BYTES + 1]
+                    if len(meta_bytes) <= MAX_JSON_BYTES:
+                        meta_json = json.loads(meta_bytes.decode("utf-8"))
+                        if isinstance(meta_json, dict) and meta_json.get("name"):
+                            base_name = str(meta_json["name"]).strip()
             except Exception:
                 pass
 
         # Evitar colisiones con nombres existentes
-        clean_folder = "".join(c for c in base_name if c not in '<>:"/\\|?*').strip() or "Personaje"
+        clean_folder = "".join(c for c in base_name if c not in '<>:"/\\|?*').strip(" .") or "Personaje"
         dest_folder = os.path.join(characters_dir, clean_folder)
         final_name = clean_folder
         n_idx = 2
@@ -149,21 +174,44 @@ def import_character_zip(zip_path, characters_dir):
             n_idx += 1
 
         os.makedirs(dest_folder, exist_ok=True)
-        dest_abs = os.path.abspath(dest_folder)
+        dest_abs = os.path.realpath(dest_folder)
+        total_written = 0
 
-        for m in members:
-            if m.startswith("__MACOSX") or m.endswith("/"):
-                continue
-            rel_m = m[len(strip_prefix):] if (strip_prefix and m.startswith(strip_prefix)) else m
-            rel_m = rel_m.lstrip("/\\")
-            if not rel_m or ".." in rel_m.split("/"):
-                continue
-            target_p = os.path.abspath(os.path.join(dest_abs, rel_m))
-            if not target_p.startswith(dest_abs):
-                continue
-            os.makedirs(os.path.dirname(target_p), exist_ok=True)
-            with zf.open(m) as src, open(target_p, "wb") as dst:
-                dst.write(src.read())
+        try:
+            for info in infos:
+                # Rechazar enlaces simbólicos empaquetados en el ZIP
+                mode = (info.external_attr >> 16) & 0o170000
+                if mode == stat.S_IFLNK:
+                    continue
+                if info.file_size > MAX_ZIP_FILE_BYTES:
+                    raise ValueError(f"Archivo demasiado grande en ZIP: {info.filename}")
+
+                norm_name = info.filename.replace("\\", "/")
+                rel_m = norm_name[len(strip_prefix):] if (strip_prefix and norm_name.startswith(strip_prefix)) else norm_name
+                rel_m = rel_m.lstrip("/")
+                if not rel_m or ".." in rel_m.split("/"):
+                    continue
+                target_p = safe_join_within(dest_abs, rel_m)
+                if not target_p:
+                    continue
+
+                os.makedirs(os.path.dirname(target_p), exist_ok=True)
+                written_file = 0
+                with zf.open(info, "r") as src, open(target_p, "wb") as dst:
+                    while True:
+                        chunk = src.read(_COPY_CHUNK)
+                        if not chunk:
+                            break
+                        written_file += len(chunk)
+                        total_written += len(chunk)
+                        if written_file > MAX_ZIP_FILE_BYTES:
+                            raise ValueError(f"Archivo excede el límite al descomprimir: {rel_m}")
+                        if total_written > MAX_ZIP_TOTAL_BYTES:
+                            raise ValueError("El tamaño total del ZIP excede el límite permitido (100 MB).")
+                        dst.write(chunk)
+        except Exception:
+            shutil.rmtree(dest_abs, ignore_errors=True)
+            raise
 
         # Actualizar name en character.json si fue renombrado por colisión
         meta_dest = os.path.join(dest_abs, "character.json")

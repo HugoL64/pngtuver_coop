@@ -111,7 +111,8 @@
     "idle": 0.63,
     "idle_blink": 2.0,
     "talk": 0.71,
-    "talk_blink": 1.0
+    "talk_blink": 1.0,
+    "scream": 1.0
   },
   "expressions": {
     "idle": "idle.png",

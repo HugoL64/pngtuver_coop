@@ -84,8 +84,21 @@
     "eye_sets": {
       "default": {
         "name": "Normal",
+        "pupil_mode": "single",
         "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
         "sprite_rel": "eyes/pupils.png",
+        "left_sprite": "",
+        "left_sprite_rel": "",
+        "left_offset_x": -30,
+        "left_offset_y": 0,
+        "left_scale": 100,
+        "left_rotation": 0,
+        "right_sprite": "",
+        "right_sprite_rel": "",
+        "right_offset_x": 30,
+        "right_offset_y": 0,
+        "right_scale": 100,
+        "right_rotation": 0,
         "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
         "mask_sprite_rel": "eyes/mask.png",
         "show_mask": true,
@@ -127,7 +140,7 @@
     "idle": "Ninguna",
     "idle_blink": "Ninguna",
     "talk": "Ninguna",
-    "talk_blink": "Ninguna",
+    "talk_blink": "Saltitos",
     "scream": "Ninguna"
   },
   "motion_speeds": {

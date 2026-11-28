@@ -3,7 +3,7 @@
   "image_mode": "4_states",
   "flip_x": false,
   "mic_threshold": 32,
-  "discord_threshold": 48,
+  "discord_threshold": 8,
   "scream_threshold": 86,
   "props": [
     {

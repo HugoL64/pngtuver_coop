@@ -8,6 +8,7 @@ con ventana de gracia de 60s y rate limiting por dirección.
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -50,6 +51,10 @@ MAX_SOCKETS_PER_ROOM = 12
 MAX_PENDING_PER_ROOM = 3
 MAX_ROOMS_PER_IP_HOUR = 5
 MAX_ACTIVE_ROOMS_PER_IP = 3
+MAX_GLOBAL_ROOMS = 500
+MAX_GLOBAL_CONNECTIONS = 100
+REJECTION_COOLDOWN_SEC = 30.0
+CLEANUP_INTERVAL_SEC = 30.0
 
 MAX_GUEST_BYTES = 512
 MAX_HOST_CONTROL_BYTES = 1024
@@ -110,6 +115,8 @@ class _Room:
         self.pending = {}  # req_id -> {"ws", "ip", "display_name", "tag", "created_at", "valid"}
         self.total_sockets = set()
         self.ip_auth_counts = {}
+        self.banned_ips = set()
+        self.rejected_ips = {}  # ip -> monotonic_until
         self.hmac_key = secrets.token_bytes(32)
 
     def stable_tag(self, seed: str) -> str:
@@ -125,7 +132,10 @@ class _Room:
 class RelayServer:
     """Servidor Relay WebSocket en estrella (Protocolo v1.3)."""
 
-    def __init__(self, allowed_guest_origins=None, require_guest_origin=True):
+    def __init__(self, allowed_guest_origins=None, require_guest_origin=True, trusted_proxies=None, local_host_only=False):
+        # Si es True, `auth_host` solo se acepta desde loopback directo (sin pasar por túnel/proxy).
+        self.local_host_only = bool(local_host_only)
+        self._kdf_sem = asyncio.Semaphore(2)
         self.allowed_guest_origins = set(
             allowed_guest_origins
             or {
@@ -139,10 +149,12 @@ class RelayServer:
             }
         )
         self.require_guest_origin = require_guest_origin
+        self.trusted_proxies = set(trusted_proxies if trusted_proxies is not None else {"127.0.0.1", "::1"})
         self.rooms = {}
         self.unauth_by_ip = {}
         self.room_creations_by_ip = {}
         self.join_rate_by_ip = {}
+        self.active_connections = 0
 
     def allow_origin(self, origin: str):
         if origin:
@@ -156,6 +168,8 @@ class RelayServer:
         raise RuntimeError("No se pudo generar room_code")
 
     def _check_room_quota(self, ip: str) -> bool:
+        if len(self.rooms) >= MAX_GLOBAL_ROOMS:
+            return False
         now = time.monotonic()
         q = self.room_creations_by_ip.setdefault(ip, deque())
         while q and (now - q[0]) > 3600.0:
@@ -195,17 +209,86 @@ class RelayServer:
         except Exception:
             return None
 
+    @staticmethod
+    def _parse_ip(raw: str):
+        try:
+            return str(ipaddress.ip_address(raw.strip()))
+        except ValueError:
+            return None
+
     def _get_ip(self, ws) -> str:
         try:
             addr = ws.remote_address
-            return str(addr[0]) if addr else "unknown"
+            peer_ip = str(addr[0]) if addr else "unknown"
         except Exception:
             return "unknown"
 
+        if peer_ip in self.trusted_proxies:
+            try:
+                headers = ws.request.headers
+            except Exception:
+                headers = {}
+            cf_ip = headers.get("CF-Connecting-IP")
+            if cf_ip:
+                parsed = self._parse_ip(cf_ip)
+                if parsed:
+                    return parsed
+            xff = headers.get("X-Forwarded-For")
+            if xff:
+                parts = [self._parse_ip(p) for p in xff.split(",")]
+                valid = [p for p in parts if p]
+                for candidate in reversed(valid):
+                    if candidate not in self.trusted_proxies:
+                        return candidate
+                if valid:
+                    return valid[0]
+            x_real = headers.get("X-Real-IP")
+            if x_real:
+                parsed = self._parse_ip(x_real)
+                if parsed:
+                    return parsed
+
+        return peer_ip
+
+    _PROXY_HEADERS = ("CF-Connecting-IP", "CF-Ray", "X-Forwarded-For", "X-Real-IP", "Forwarded")
+
+    def _is_direct_local(self, ws) -> bool:
+        """True si el socket viene de loopback y NO fue reenviado por un túnel/proxy (p. ej. cloudflared)."""
+        try:
+            addr = ws.remote_address
+            peer = ipaddress.ip_address(str(addr[0]).strip()) if addr else None
+        except Exception:
+            return False
+        if peer is None:
+            return False
+        mapped = getattr(peer, "ipv4_mapped", None)
+        if not (peer.is_loopback or (mapped is not None and mapped.is_loopback)):
+            return False
+        try:
+            headers = ws.request.headers
+        except Exception:
+            return False
+        return not any(headers.get(h) for h in self._PROXY_HEADERS)
+
+    async def _verify_pin_async(self, pin: str, pin_kdf) -> bool:
+        """Verifica el PIN con scrypt fuera del event loop y con concurrencia acotada."""
+        if not pin_kdf:
+            return True
+        async with self._kdf_sem:
+            try:
+                return await asyncio.to_thread(_verify_scrypt_pin, pin, pin_kdf)
+            except Exception:
+                return False
+
     async def handle_connection(self, ws):
+        if self.active_connections >= MAX_GLOBAL_CONNECTIONS:
+            await ws.close(1013, "Servidor ocupado")
+            return
+        self.active_connections += 1
         ip = self._get_ip(ws)
         cur_unauth = self.unauth_by_ip.get(ip, 0)
         if cur_unauth >= MAX_UNAUTH_PER_IP:
+            self.active_connections = max(0, self.active_connections - 1)
             await ws.close(1013, "Demasiadas conexiones sin autenticar")
             return
         self.unauth_by_ip[ip] = cur_unauth + 1
@@ -240,6 +323,10 @@ class RelayServer:
                 if origin is not None:
                     await ws.close(1008, "Host no debe enviar Origin")
                     return
+                if self.local_host_only and not self._is_direct_local(ws):
+                    log_debug("[RELAY-SRV] auth_host rechazado: no proviene de loopback directo")
+                    await ws.close(1008, "Handshake inválido")
+                    return
                 data = validate_auth_host(msg)
                 _release_unauth()
                 await self._handle_host_session(ws, ip, data)
@@ -251,8 +338,7 @@ class RelayServer:
                     await ws.close(1008, "Origin no permitido")
                     return
                 data = validate_join(msg)
-                _release_unauth()
-                await self._handle_guest_session(ws, ip, data)
+                await self._handle_guest_session(ws, ip, data, _release_unauth)
                 return
 
             await ws.close(1008, "Handshake inválido")
@@ -265,6 +351,7 @@ class RelayServer:
             pass
         finally:
             _release_unauth()
+            self.active_connections = max(0, self.active_connections - 1)
 
     async def _handle_host_session(self, ws, ip: str, data: dict):
         rc = data["room_code"]
@@ -348,6 +435,9 @@ class RelayServer:
                         continue
                     slot = dec["slot"]
                     if not dec["allow"]:
+                        pend_ip = pend.get("ip")
+                        if pend_ip:
+                            room.rejected_ips[pend_ip] = time.monotonic() + REJECTION_COOLDOWN_SEC
                         try:
                             await pend["ws"].close(4002, "Rechazado")
                         except Exception:
@@ -366,17 +456,22 @@ class RelayServer:
                     perms = validate_permissions(msg.get("permissions"))
                     s_info = room.slots.get(slot)
                     if s_info:
+                        s_info["permissions"] = perms
                         await self._send_json(s_info["ws"], {"v": 1, "t": "permissions", "permissions": perms})
 
                 elif t == "kick":
                     kd = validate_kick(msg)
                     s_info = room.slots.pop(kd["slot"], None)
                     if s_info:
+                        room.total_sockets.discard(s_info["ws"])
+                        if kd["ban"] and s_info.get("ip"):
+                            room.banned_ips.add(s_info["ip"])
                         try:
                             await s_info["ws"].close(4006, "Expulsado")
                         except Exception:
                             pass
                     if kd["ban"]:
+                        room.invite_token_hash = None
                         await self._cancel_all_pending(room)
 
                 elif t == "kick_all":
@@ -425,12 +520,14 @@ class RelayServer:
         tag = room.stable_tag(new_tok)
         room.slots[slot] = {
             "ws": pend["ws"],
+            "ip": pend.get("ip", ""),
             "session_hash": _sha256_hex(new_tok),
             "prev_hash": None,
             "prev_until": 0.0,
             "prev_used": False,
             "tag": tag,
             "display_name": pend["display_name"],
+            "permissions": dict(perms),
             "expires_at": time.monotonic() + SESSION_TTL_SEC,
             "admitted_event": pend.get("admitted_event"),
             "slot": slot,
@@ -454,12 +551,12 @@ class RelayServer:
                 },
             )
 
-    async def _handle_guest_session(self, ws, ip: str, data: dict):
+    async def _handle_guest_session(self, ws, ip: str, data: dict, release_unauth=None):
         # Indistinguibilidad total: siempre respondemos join_pending primero
         await self._send_json(ws, {"v": 1, "t": "join_pending"})
 
         room = self.rooms.get(data["room_code"])
-        if room is None or len(room.total_sockets) >= MAX_SOCKETS_PER_ROOM:
+        if room is None or len(room.total_sockets) >= MAX_SOCKETS_PER_ROOM or ip in room.banned_ips:
             await self._close_uniform_fail(ws)
             return
 
@@ -479,6 +576,7 @@ class RelayServer:
                     if info["prev_used"]:
                         # Posible robo de sesión: invalidar ambos y cerrar slot
                         room.slots.pop(s, None)
+                        room.total_sockets.discard(info["ws"])
                         try:
                             await info["ws"].close(4006, "Reuso de sesión detectado")
                         except Exception:
@@ -498,6 +596,8 @@ class RelayServer:
                 await self._close_uniform_fail(ws)
                 return
 
+            if release_unauth:
+                release_unauth()
             info = room.slots[matched_slot]
             old_ws = info["ws"]
             new_tok = secrets.token_urlsafe(24)
@@ -505,15 +605,24 @@ class RelayServer:
             info["prev_until"] = now + SESSION_GRACE_SEC
             info["prev_used"] = used_prev
             info["session_hash"] = _sha256_hex(new_tok)
+            info["ip"] = ip
             info["ws"] = ws
+            room.total_sockets.add(ws)
             if old_ws is not ws:
+                room.total_sockets.discard(old_ws)
                 try:
                     await old_ws.close(4005, "Reemplazado")
                 except Exception:
                     pass
             await self._send_json(
                 ws,
-                {"v": 1, "t": "joined", "slot": matched_slot, "session_token": new_tok, "permissions": {}},
+                {
+                    "v": 1,
+                    "t": "joined",
+                    "slot": matched_slot,
+                    "session_token": new_tok,
+                    "permissions": dict(info.get("permissions") or {}),
+                },
             )
             if room.host_ws:
                 await self._send_json(
@@ -530,14 +639,24 @@ class RelayServer:
             await self._guest_loop(ws, room, matched_slot)
             return
 
-        # 2. Nuevo ingreso: rate limit ANTES de KDF
+        # 2. Nuevo ingreso: cooldown por rechazo + rate limit ANTES de KDF
+        if now_rej := room.rejected_ips.get(ip):
+            if time.monotonic() < now_rej:
+                await self._close_uniform_fail(ws)
+                return
+            room.rejected_ips.pop(ip, None)
+
         if not self._check_join_rate(ip):
             await self._close_uniform_fail(ws)
             return
 
         inv_hash = _sha256_hex(data["invite_token"])
-        valid_inv = hmac.compare_digest(inv_hash, room.invite_token_hash)
-        valid_pin = _verify_scrypt_pin(data.get("pin") or "", room.pin_kdf)
+        valid_inv = bool(room.invite_token_hash) and hmac.compare_digest(inv_hash, room.invite_token_hash)
+        # El KDF solo se calcula si el invite es válido (todos los fallos ya esperan 45 s de forma
+        # uniforme, así que omitirlo no filtra información por tiempo) y nunca bloquea el loop.
+        valid_pin = False
+        if valid_inv:
+            valid_pin = await self._verify_pin_async(data.get("pin") or "", room.pin_kdf)
 
         if not (valid_inv and valid_pin) or room.host_ws is None or len(room.pending) >= MAX_PENDING_PER_ROOM:
             log_debug(
@@ -562,8 +681,10 @@ class RelayServer:
             "admitted_event": admitted_event,
         }
         room.total_sockets.add(ws)
+        if release_unauth:
+            release_unauth()
 
-        log_debug(f"[RELAY-SRV] Enviando join_request al Host: {data['display_name']}#{tag} (slot={room.free_slot()})")
+        log_debug(f"[RELAY-SRV] Enviando join_request al Host: #{tag} (slot={room.free_slot()})")
         await self._send_json(
             room.host_ws,
             {
@@ -674,10 +795,77 @@ class RelayServer:
                     await self._send_json(room.host_ws, {"v": 1, "t": "guest_left", "slot": slot})
 
 
+    async def cleanup_expired(self):
+        now = time.monotonic()
+        for rc, room in list(self.rooms.items()):
+            room_expired = (now - room.created_at) >= ROOM_MAX_TTL_SEC
+            host_expired = (
+                room.host_ws is None
+                and room.host_offline_since is not None
+                and (now - room.host_offline_since) >= HOST_OFFLINE_TTL_SEC
+            )
+            if room_expired or host_expired:
+                self.rooms.pop(rc, None)
+                reason = "Sala expirada" if room_expired else "Host desconectado"
+                await self._cancel_all_pending(room)
+                for s_info in list(room.slots.values()):
+                    try:
+                        await s_info["ws"].close(4003, reason)
+                    except Exception:
+                        pass
+                room.slots.clear()
+                if room.host_ws is not None:
+                    try:
+                        await room.host_ws.close(4003, reason)
+                    except Exception:
+                        pass
+                room.total_sockets.clear()
+                continue
+
+            for slot, s_info in list(room.slots.items()):
+                if now > s_info["expires_at"]:
+                    room.slots.pop(slot, None)
+                    room.total_sockets.discard(s_info["ws"])
+                    try:
+                        await s_info["ws"].close(4003, "Sesión expirada")
+                    except Exception:
+                        pass
+                    if room.host_ws is not None:
+                        await self._send_json(room.host_ws, {"v": 1, "t": "guest_left", "slot": slot})
+
+            for rej_ip, until in list(room.rejected_ips.items()):
+                if now >= until:
+                    room.rejected_ips.pop(rej_ip, None)
+
+        for ip, q in list(self.room_creations_by_ip.items()):
+            while q and (now - q[0]) > 3600.0:
+                q.popleft()
+            if not q:
+                self.room_creations_by_ip.pop(ip, None)
+
+        for ip, q in list(self.join_rate_by_ip.items()):
+            while q and (now - q[0]) > 10.0:
+                q.popleft()
+            if not q:
+                self.join_rate_by_ip.pop(ip, None)
+
+    async def _cleanup_loop(self):
+        while True:
+            await asyncio.sleep(CLEANUP_INTERVAL_SEC)
+            try:
+                await self.cleanup_expired()
+            except Exception as exc:
+                log_debug(f"[RELAY-SRV] Error en cleanup_expired: {type(exc).__name__}")
+
+
 async def run_relay(host="127.0.0.1", port=8766):
     srv = RelayServer()
-    async with websockets.serve(srv.handle_connection, host, port, compression=None):
-        await asyncio.Future()
+    cleanup_task = asyncio.create_task(srv._cleanup_loop())
+    try:
+        async with websockets.serve(srv.handle_connection, host, port, compression=None):
+            await asyncio.Future()
+    finally:
+        cleanup_task.cancel()
 
 
 if __name__ == "__main__":

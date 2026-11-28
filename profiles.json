@@ -105,6 +105,7 @@
         "hide_on_blink": true,
         "frame_overrides": {}
       },
+      "a1_scream_speed": 1.0,
       "emotion_slots": [
         {
           "name": "1",
@@ -484,7 +485,7 @@
       "a1_idle_motion": "Ninguna",
       "a1_idle_blink_motion": "Ninguna",
       "a1_talk_motion": "Ninguna",
-      "a1_talk_blink_motion": "Ninguna",
+      "a1_talk_blink_motion": "Saltitos",
       "a1_scream_motion": "Ninguna",
       "a1_ext_trans_mouth_inbetween_33732": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochi\\ext_trans_mouth_inbetween_33732.png",
       "a1_ext_trans_mouth_inbetween_33732_motion": "Ninguna",
@@ -558,8 +559,21 @@
         "eye_sets": {
           "default": {
             "name": "Normal",
+            "pupil_mode": "single",
             "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
             "sprite_rel": "eyes/pupils.png",
+            "left_sprite": "",
+            "left_sprite_rel": "",
+            "left_offset_x": -30,
+            "left_offset_y": 0,
+            "left_scale": 100,
+            "left_rotation": 0,
+            "right_sprite": "",
+            "right_sprite_rel": "",
+            "right_offset_x": 30,
+            "right_offset_y": 0,
+            "right_scale": 100,
+            "right_rotation": 0,
             "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
             "mask_sprite_rel": "eyes/mask.png",
             "show_mask": true,
@@ -768,10 +782,29 @@
       "a2_idle_blink_motion": "Ninguna",
       "a2_talk_blink_motion": "Respiración",
       "flip_x": false,
+      "a2_ext_trans_mouth_inbetween_7062": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_mouth_inbetween_7062.png",
+      "a2_ext_trans_mouth_inbetween_7062_motion": "Respiración",
+      "a2_ext_state_scream_30280": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_state_scream_30280.png",
+      "a2_ext_state_scream_30280_motion": "Flotar",
+      "a2_ext_trans_pre_talk_43755_speed": 1.0,
+      "a2_talk_blink_speed": 1.0,
+      "a2_ext_trans_mouth_inbetween_7062_speed": 1.0,
+      "a2_ext_state_scream_30280_speed": 1.0,
       "a2_idle_speed": 0.63,
       "a2_idle_blink_speed": 2.0,
       "a2_talk_speed": 0.71,
-      "a2_talk_blink_speed": 1.0,
+      "a2_ext_trans_pre_scream_81532": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_pre_scream_81532.png",
+      "a2_ext_trans_pre_scream_81532_motion": "Balanceo",
+      "a2_ext_trans_pre_scream_81532_speed": 1.0,
+      "a2_ext_trans_blink_inbetween_38090": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_inbetween_38090.png",
+      "a2_ext_trans_blink_inbetween_38090_motion": "Elástico",
+      "a2_ext_trans_blink_inbetween_38090_speed": 1.0,
+      "a2_ext_trans_blink_talk_inbetween_96899": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_blink_talk_inbetween_96899.png",
+      "a2_ext_trans_blink_talk_inbetween_96899_motion": "Respiración",
+      "a2_ext_idle_fidget_22978": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_idle_fidget_22978.png",
+      "a2_ext_idle_fidget_22978_motion": "Saltitos",
+      "a2_ext_idle_fidget_22978_speed": 1.0,
+      "a2_ext_trans_blink_talk_inbetween_96899_speed": 1.0,
       "independent_mouth": {
         "enabled": false,
         "mode": "volume",
@@ -827,6 +860,7 @@
         "hide_on_blink": true,
         "frame_overrides": {}
       },
+      "a2_scream_speed": 1.0,
       "emotion_slots": [
         {
           "name": "1",
@@ -868,8 +902,8 @@
     },
     "Lisa Mochy": {
       "discord_source_id": "app:discord",
-      "discord_threshold": 48,
-      "scream_threshold": 88,
+      "discord_threshold": 8,
+      "scream_threshold": 45,
       "image_mode": "4_states",
       "props": [
         {
@@ -952,7 +986,7 @@
       "a2_scream_motion": "Sacudida",
       "a2_idle_blink_motion": "Saltitos",
       "a2_talk_blink_motion": "Ninguna",
-      "flip_x": false,
+      "flip_x": true,
       "a2_ext_trans_mouth_inbetween_7062": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_mouth_inbetween_7062.png",
       "a2_ext_trans_mouth_inbetween_7062_motion": "Respiración",
       "a2_ext_state_scream_30280": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_state_scream_30280.png",
@@ -1069,7 +1103,7 @@
           "motion_speeds": {}
         }
       ],
-      "active_emotion": 0
+      "active_emotion": 2
     },
     "Nara": {
       "discord_source_id": "app:discord",
@@ -1082,12 +1116,12 @@
       "a2_idle_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\idle_blink.png",
       "a2_talk": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk.png",
       "a2_talk_blink": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\talk_blink.png",
-      "a2_scream": "",
+      "a2_scream": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\scream.png",
       "a2_idle_motion": "Ninguna",
       "a2_talk_motion": "Ninguna",
       "a2_scream_motion": "Ninguna",
       "a2_idle_blink_motion": "Ninguna",
-      "a2_talk_blink_motion": "Ninguna",
+      "a2_talk_blink_motion": "Saltitos",
       "flip_x": false,
       "a2_ext_trans_mouth_inbetween_7062": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Lisa Mochy\\ext_trans_mouth_inbetween_7062.png",
       "a2_ext_trans_mouth_inbetween_7062_motion": "Respiración",
@@ -1151,8 +1185,21 @@
         "eye_sets": {
           "default": {
             "name": "Normal",
+            "pupil_mode": "single",
             "sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\pupils.png",
             "sprite_rel": "eyes/pupils.png",
+            "left_sprite": "",
+            "left_sprite_rel": "",
+            "left_offset_x": -30,
+            "left_offset_y": 0,
+            "left_scale": 100,
+            "left_rotation": 0,
+            "right_sprite": "",
+            "right_sprite_rel": "",
+            "right_offset_x": 30,
+            "right_offset_y": 0,
+            "right_scale": 100,
+            "right_rotation": 0,
             "mask_sprite": "D:\\Progra\\hobie\\vtuber coop\\personajes\\Nara\\eyes\\mask.png",
             "mask_sprite_rel": "eyes/mask.png",
             "show_mask": true,

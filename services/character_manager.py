@@ -9,6 +9,7 @@ from core.app_constants import PROFILES_FILE, CONFIG_FILE, CHARACTERS_DIR, log_d
 from core.lipsync import normalize_independent_mouth
 from core.emotions import normalize_emotion_slots
 from core.eyes import normalize_independent_eyes
+from core.safe_paths import safe_join_within
 
 
 class CharacterManagerMixin:
@@ -390,8 +391,8 @@ class CharacterManagerMixin:
                     for p in meta_disk.get("props", []):
                         p_loaded = dict(p)
                         if p_loaded.get("file_rel"):
-                            cand_rel = os.path.abspath(os.path.join(folder_path, p_loaded["file_rel"]))
-                            if os.path.exists(cand_rel):
+                            cand_rel = safe_join_within(folder_path, p_loaded["file_rel"])
+                            if cand_rel and os.path.exists(cand_rel):
                                 p_loaded["file"] = cand_rel
                         if not p_loaded.get("file") or not os.path.exists(p_loaded.get("file", "")):
                             cand = os.path.join(folder_path, "props", os.path.basename(p_loaded.get("file", "")))
@@ -410,8 +411,8 @@ class CharacterManagerMixin:
                         ex_loaded = dict(ex)
                         r_id = ex_loaded.get("role", "")
                         if ex_loaded.get("file_rel"):
-                            cand_f = os.path.abspath(os.path.join(folder_path, ex_loaded["file_rel"]))
-                            if os.path.exists(cand_f):
+                            cand_f = safe_join_within(folder_path, ex_loaded["file_rel"])
+                            if cand_f and os.path.exists(cand_f):
                                 ex_loaded["file"] = cand_f
                         if not ex_loaded.get("file") or not os.path.exists(ex_loaded.get("file", "")):
                             if r_id:

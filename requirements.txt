@@ -1,16 +1,16 @@
 # Dependencias principales de PNGTuber Duo / Coop
-Pillow>=10.0.0
-numpy>=1.24.0
-psutil>=5.9.0
+Pillow>=10.0.0,<13.0.0
+numpy>=1.24.0,<3.0.0
+psutil>=5.9.0,<8.0.0
 
 # Captura de audio
 # En Windows se utiliza PyAudioWPatch para loopback WASAPI nativo sin cables virtuales
-PyAudioWPatch>=0.2.12.6; sys_platform == 'win32'
+PyAudioWPatch>=0.2.12.6,<1.0.0; sys_platform == 'win32'
 # En Linux / macOS se utiliza PyAudio estándar
-PyAudio>=0.2.13; sys_platform != 'win32'
+PyAudio>=0.2.13,<1.0.0; sys_platform != 'win32'
 
 # Opcional (Windows): captura aislada por proceso (Discord)
-process-audio-capture>=0.1.0; sys_platform == 'win32'
+process-audio-capture>=0.1.0,<1.0.0; sys_platform == 'win32'
 
 # Co-op remoto por WebSocket
-websockets>=13.0
+websockets>=13.0,<16.0

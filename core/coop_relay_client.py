@@ -37,6 +37,30 @@ class CoopRelayClient:
         self._ws = None
         self.connected = False
 
+    def set_pin(self, pin: str = ""):
+        """Configura o limpia el PIN opcional de la sala derivando scrypt localmente."""
+        clean = str(pin or "").strip()
+        if not clean:
+            self.pin_kdf = None
+            return None
+        salt = secrets.token_hex(16)
+        n, r, p = 16384, 8, 1
+        derived = hashlib.scrypt(
+            clean.encode("utf-8"),
+            salt=salt.encode("utf-8"),
+            n=n,
+            r=r,
+            p=p,
+            dklen=32,
+        ).hex()
+        self.pin_kdf = {
+            "alg": "scrypt",
+            "salt": salt,
+            "params": {"N": n, "r": r, "p": p},
+            "hash": derived,
+        }
+        return self.pin_kdf
+
     def rotate_invite_token(self):
         self.invite_token = secrets.token_urlsafe(24)
         inv_hash = hashlib.sha256(self.invite_token.encode("utf-8")).hexdigest()
@@ -202,7 +226,7 @@ class CoopRelayClient:
                 inbox.on_guest_left(msg.get("slot"))
 
             elif t == "join_request":
-                log_debug(f"[RELAY-CLIENT] Solicitud de entrada recibida: {msg.get('display_name')}#{msg.get('tag')}")
+                log_debug(f"[RELAY-CLIENT] Solicitud de entrada recibida: #{msg.get('tag')}")
                 if self.on_join_request:
                     try:
                         self.on_join_request(msg)

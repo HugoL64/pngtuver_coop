@@ -1,5 +1,7 @@
 import os
 
+from core.safe_paths import safe_join_within
+
 BASE_POSE_ROLES = ("idle", "idle_blink", "talk", "talk_blink", "scream")
 
 
@@ -37,8 +39,8 @@ def normalize_emotion_slots(raw_slots, folder_path=None):
                 abs_p = str(raw_imgs.get(r, "") or "")
                 rel_p = str(raw_rels.get(r, "") or "")
                 if folder_path and rel_p:
-                    cand = os.path.abspath(os.path.join(folder_path, rel_p))
-                    if os.path.exists(cand):
+                    cand = safe_join_within(folder_path, rel_p)
+                    if cand and os.path.exists(cand):
                         abs_p = cand
                 if abs_p and not os.path.exists(abs_p) and folder_path:
                     cand_e = os.path.join(folder_path, "emotions", f"slot_{idx + 1}", os.path.basename(abs_p))
